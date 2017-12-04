@@ -1,0 +1,16 @@
+Package: CTStepTurn
+Type: Package
+Title: Fitting the continuous-time step-and-turn movement model
+Version: 0.1.0
+Authors: Alison Parton (cre) AParton2@sheffield.ac.uk
+Maintainer: Alison Parton <AParton2@sheffield.ac.uk>
+Description: This package provides the range of functions required for carrying 
+    out full Bayesian inference on continuous-time step-and-turn movement models.
+    Given observed animal locations, single- and multi-state movement can be inferred
+    for movement models assuming either independent or correlated step processes. 
+    Inference can be carried out in the presence or absence of observation error, 
+    with this error process either being independent of correlated in time.
+License: Proprietary
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.0.1.9000

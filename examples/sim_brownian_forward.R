@@ -1,0 +1,27 @@
+num_states <- 2
+fixed_values <- list(time = 0,
+                     behav = 1,
+                     bearing = 0.1)
+times <- seq(0, 10, length.out = 22)[-1]
+behavs <- c(rep(1, 5), rep(2, 9), rep(1, 3), rep(2, 4))
+variance <- c(0.3, 1.5)
+
+set.seed(123)
+sim_brownian_forward(num_states, fixed_values, times, behavs, variance)
+# [1] -0.1118399 -0.1988388  0.3902976  0.4169472  0.4658134  1.1140470  1.5035923  0.4344204
+# [9] -0.1460762 -0.5227293  0.5118087  0.8159069  1.1546206  1.2481645  0.7783930  1.4537827
+# [17]  1.6419525  0.8986411  1.4913950  1.0918133  0.1893376
+
+num_states <- 2
+fixed_values <- list(time = 0,
+                     behav = 1,
+                     bearing = 0.1)
+times <- seq(0, 10, length.out = 22)[-1]
+behavs <- rep(1, 21)
+variance <- c(0.03, 1.5)
+
+set.seed(2712)
+sim_brownian_forward(num_states, fixed_values, times, behavs, variance)
+# [1]  0.19420896  0.24696428  0.25704154 -0.07237042  0.01039176  0.25189964  0.17573425
+# [8]  0.19193573  0.37956119  0.35783347  0.23250473  0.27866206  0.27994169  0.36602306
+# [15]  0.39462056  0.38095557  0.27682310  0.17235261  0.21619402  0.08473197 -0.03972749
