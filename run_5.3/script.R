@@ -6,11 +6,11 @@ library(CTStepTurn)
 source("../FixedConstants.R"); source("../InitialPath.R")
 
 # Set observations (x, y, times)
-obs <- as.list(read.table("noisy_observations.txt", header = T))
+obs <- as.list(read.table("observations.txt", header = T))
 obs$time_diffs <- diff(obs$times)
 
 # Set initial refined path
-refined_path <- InitialPath(obs, time_scale = 0.25, error = TRUE, corr_error = FALSE, error_para = 25)
+refined_path <- InitialPath(obs, time_scale = 0.25, error = TRUE, corr_error = FALSE, error_para = 100)
 obs$index_on_refined_path <- which(refined_path$times %in% obs$times)
 obs$errors <- list(x = obs$x - refined_path$X[obs$index_on_refined_path],
                    y = obs$y - refined_path$Y[obs$index_on_refined_path])
@@ -20,22 +20,28 @@ move_params <-  c(var(diff(refined_path$bearings))/0.25,
                   mean(refined_path$steps)/0.25,
                   log(acf(refined_path$steps,plot=F)$acf[2])/(-2*0.25),
                   var(refined_path$steps)/0.25^2,
-                  50)
+                  100)
 
 # Assign the fixed constants
-fixed_constant <- FixedConstants(pert_sd = sqrt(c(1,0.08,24)), error_pert_sd = NULL,
+fixed_constant <- FixedConstants(pert_sd = sqrt(c(4, 0.3, 100)), error_pert_sd = NULL,
                                  num_states = 1,
+                                 turn_prec_prior_shape = 0.5, turn_prec_prior_rate = 0.5,
+                                 error_prec_prior_shape = 2, error_prec_prior_rate = 200,
                                  indep_step = FALSE, obs_error = TRUE, corr_obs_error = FALSE)
 
 # Assign fixed prior distributions - also need behaviour priors if applicable
 calc_prior_speed_lik <- function(move_params) {
-  dhalfnorm(move_params[3], 0.25, log = T)
+  neg_step <- ifelse(pnorm(0,
+                           mean = 5 * exp(-move_params[3]*0.25) + move_params[2]*(1-exp(-move_params[3]*0.25)),
+                           sd = sqrt(move_params[4]*(1-exp(-2*move_params[3]*0.25)))) < 0.1, log(1), log(0))
+  beta_prior <- dhalfnorm(move_params[3], theta = sqrt(0.7), log = TRUE)
+  neg_step + beta_prior
 }
 
 # Assign variables relating to the number of MCMC iterations, thinning, etc.
 section_length_limits <- c(3, 16)
 speed_param_count <- 0; refined_path_count <- 0
-num_iterations <- 5 * 10^8; num_extra_path_updates <- 100; thin <- 10^5
+num_iterations <- 5 * 10^8; num_extra_path_updates <- 50; thin <- 10^5
 stored_move_params <- matrix(NA, nrow = num_iterations / thin, ncol = fixed_constant$num_move_params)
 stored_refined_path <- vector("list", num_iterations / thin)
 
@@ -72,6 +78,9 @@ for (i in 1:num_iterations) {
 
     # update the bearing parameters by a Gibbs sampler
     move_params[fixed_constant$q.bearings] <- update_bearing_param(fixed_constant, refined_path)
+
+    # carry out a Gibbs update to the observation error parameter
+    move_params[fixed_constant$q.obs_error] <- Gibbs_update_obs_error_param(fixed_constant$error_prec_prior, refined_path, obs)
 
   }
 
@@ -189,7 +198,7 @@ samp_steps<- matrix(NA, nrow = n, ncol = length(refined_path$bearings))
 samp_loc <- matrix(NA, nrow = n*l, ncol = 3)
 for(i in 1:n){
   samp_bearings[i, ] <- stored_refined_path[[i]]$bearings
-  samp_steps[i, ] <- stored_refined_path[[i]]$steps
+  samp_steps[i, ] <- stored_refined_path[[j]]$steps
   samp_loc[((i-1)*l+1):(i*l),1] <- stored_refined_path[[i]]$X
   samp_loc[((i-1)*l+1):(i*l),2] <- stored_refined_path[[i]]$Y
   samp_loc[((i-1)*l+1):(i*l),3] <- i

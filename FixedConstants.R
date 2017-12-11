@@ -19,7 +19,8 @@ FixedConstants <- function(pert_sd, error_pert_sd = NULL,
                            num_states = 1,
                            indep_step = FALSE, obs_error = FALSE, corr_obs_error = FALSE,
                            turn_prec_prior_shape = 0.001, turn_prec_prior_rate = 0.001,
-                           error_prec_prior_shape = NULL, error_prec_prior_rate = NULL)
+                           error_prec_prior_shape = NULL, error_prec_prior_rate = NULL,
+                           prior_param = NULL, time_scale = NULL)
 {
 
   if (indep_step) {
@@ -27,22 +28,22 @@ FixedConstants <- function(pert_sd, error_pert_sd = NULL,
     num_speed_param <- 2 * num_states
     q.bearings <- 1:num_states
     q.speed_mean <- (num_states+1):(2*num_states)
-    q.speed_var <- (2*num_states+1):(2*num_states)
+    q.speed_var <- (2*num_states+1):(3*num_states)
     if(corr_obs_error) q.obs_error <- (3*num_states+1):(3*num_states+2)
     else q.obs_error <- 3*num_states+1
 
     fc <- list(
       pert_sd = pert_sd,
       error_pert_sd = error_pert_sd,
-      num_states = 1,
+      num_states = num_states,
       indep_step = indep_step, obs_error = obs_error, corr_obs_error = corr_obs_error,
       num_move_params = num_move_params, num_speed_param = num_speed_param,
       q.bearings = q.bearings, q.speed_mean = q.speed_mean, q.speed_var = q.speed_var,
       q.obs_error = q.obs_error,
       turn_prec_prior = list(rate = turn_prec_prior_rate,
                              shape = turn_prec_prior_shape),
-      error_prec_prior = list(rate = error_prec_prior$rate,
-                              shape = error_prec_prior$shape)
+      error_prec_prior = list(rate = error_prec_prior_rate,
+                              shape = error_prec_prior_shape)
     )
   } else {
     num_move_params <- 4 * num_states + obs_error + corr_obs_error
@@ -57,7 +58,7 @@ FixedConstants <- function(pert_sd, error_pert_sd = NULL,
     fc <- list(
       pert_sd = pert_sd,
       error_pert_sd = error_pert_sd,
-      num_states = 1,
+      num_states = num_states,
       indep_step = indep_step, obs_error = obs_error, corr_obs_error = corr_obs_error,
       num_move_params = num_move_params, num_speed_param = num_speed_param,
       q.bearings = q.bearings, q.speed_mean = q.speed_mean, q.speed_corr = q.speed_corr, q.speed_var = q.speed_var,
@@ -67,6 +68,12 @@ FixedConstants <- function(pert_sd, error_pert_sd = NULL,
       error_prec_prior = list(rate = error_prec_prior_rate,
                               shape = error_prec_prior_shape)
     )
+  }
+
+  if (num_states > 1) {
+    fc <- c(fc,
+            ideal_refined_time_diff = time_scale,
+            prior_param = list(prior_param))
   }
 
   ## Set the name for the class

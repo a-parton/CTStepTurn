@@ -178,10 +178,10 @@ for (i in 1:num_iterations) {
 }
 ############################################
 
-save.image("results.RData")
-write.table(stored_move_params, file = "move_param.txt", row.names = F)
+save.image("results_50.RData")
+write.table(stored_move_params, file = "move_param_50.txt", row.names = F)
 write.table(c(speed_param_count, speed_param_count / (num_iterations / num_extra_path_updates),
-              refined_path_count, refined_path_count / num_iterations), file = "acceptance.txt", row.names = F)
+              refined_path_count, refined_path_count / num_iterations), file = "acceptance_50.txt", row.names = F)
 n <- num_iterations / thin
 l <- length(refined_path$X)
 samp_bearings <- matrix(NA, nrow = n, ncol = length(refined_path$bearings))
@@ -194,6 +194,6 @@ for(i in 1:n){
   samp_loc[((i-1)*l+1):(i*l),2] <- stored_refined_path[[i]]$Y
   samp_loc[((i-1)*l+1):(i*l),3] <- i
 }
-write.table(samp_bearings, "bearings.txt", row.names = F)
-write.table(samp_steps, "steps.txt", row.names = F)
-write.table(samp_loc, "loc.txt", row.names = F)
+write.table(samp_bearings, "bearings_50.txt", row.names = F)
+write.table(samp_steps, "steps_50.txt", row.names = F)
+write.table(samp_loc, "loc_50.txt", row.names = F)
