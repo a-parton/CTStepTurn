@@ -20,8 +20,7 @@ FixedConstants <- function(pert_sd, error_pert_sd = NULL,
                            indep_step = FALSE, obs_error = FALSE, corr_obs_error = FALSE,
                            turn_prec_prior_shape = 0.001, turn_prec_prior_rate = 0.001,
                            error_prec_prior_shape = NULL, error_prec_prior_rate = NULL,
-                           prior_param = NULL, time_scale = NULL)
-{
+                           prior_param = NULL, time_scale = NULL){
 
   if (indep_step) {
     num_move_params <- 3 * num_states + obs_error + corr_obs_error

@@ -93,7 +93,11 @@ update_refined_path <- function(fixed_constant, type, fixed_values, curr_values,
       # propose a new section of behaviours
       prop_behav <- sim_markov_bridge(fixed_constant$num_states, fixed_values, behav_params)
       # if the rejection proposal is instantly rejected, break out of the path proposal altogether
+<<<<<<< HEAD
       if (!prop_behav$accept) return(list(accept = 0, behav_fail = 1))
+=======
+      if (prop_behav$accept == 0) return(list(accept = 0, behav_fail = 1))
+>>>>>>> 0d0fd0e6217d08d0e185598e2f9e9016d200cb98
 
       # using the new behaviours, create the refined time scale and behaviours
       prop_times <- create_refined_times(ideal_refined_time_diff = fixed_constant$ideal_refined_time_diff, behav_proc_times = prop_behav$times, contained_obs_times = fixed_values$obs_times)
