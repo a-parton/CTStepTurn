@@ -1,0 +1,256 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
+\usepackage{setspace}
+\doublespacing
+\usepackage{amsmath}
+\usepackage{pdflscape}
+
+\title{Single state reindeer example with observation error}
+\author{Alison Parton}
+\date{December 2017}
+
+\begin{document}
+%\SweaveOpts{concordance=TRUE}
+\let\B\boldsymbol
+
+<<setup, include=FALSE, cache=FALSE>>=
+library(knitr)
+# set global chunk options
+opts_chunk$set(fig.path='figure/minimal-', fig.align='center', fig.show='hold')
+options(formatR.arrow=TRUE,width=90)
+knitr::opts_chunk$set(echo = FALSE)
+library(psych) # required for displaying head and tail of a dataframe together
+library(ggplot2) # required for graphics
+library(grid) # required to plot mutliple things together
+library(reshape2)
+library(gridExtra)
+source("qacf.R") # function to plot acf in ggplot2
+library(coda)
+library(lattice)
+@
+
+\maketitle
+
+<< obs >>=
+obs <- read.table("../observations.txt", header = TRUE)
+
+kable(headTail(obs[ ,c(3,1,2)], hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extracts of the observed locations.",
+      col.names=c("Time","X","Y"))
+@
+
+<< obs_plot, fig.height = 7, fig.width = 6, fig.cap = "" >>=
+ggplot(data = obs, aes(x, y)) +
+    geom_point() + geom_path(alpha = 0.5) +
+    theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+@
+
+<< load initial data >>=
+initial_paths <- read.table("../initial_path.txt", header = T)
+
+initial_paths$speeds <- initial_paths$steps / 0.25
+initial_paths$turns <- c(diff(initial_paths$bearings), NA)
+
+
+#cols <- c("#c7e9b4", "#7fcdbb", "#41b6c4", "#2c7fb8", "#253494")
+#cols <- rev(c("#fdcc8a", "#fc8d59", "#d7301f", "black"))
+cols <- c("#e41a1c","#377eb8","#4daf4a", "black")
+@
+
+<< initial_bear_speed, fig.cap = "" >>=
+melt.red_init_paths <- melt(initial_paths,
+                            id.var = c("times"),
+                            measure.var = c("turns","speeds"))
+
+levels(melt.red_init_paths$variable) <- c(expression(paste(delta*theta," (difference of bearing)")),
+                                          expression(paste(psi," (speed)")))
+
+ggplot(data = melt.red_init_paths, aes(times, value)) +
+  geom_line(na.rm = T) +
+  facet_grid(variable ~ ., scales = "free", labeller=label_parsed) +
+  theme_bw() + theme(legend.position="top") +
+  xlab("Time") + ylab("")
+
+@
+
+<< load sampled parameters >>=
+samp_param <- read.table("../move_param.txt", header = T)
+samp_param$iter <- seq(1, 10^7, 2000)
+burn_in_rows <- 1:1000
+# take the first 1/5 of the run as burn-in
+@
+
+<< param_trace, fig.width = 8, fig.height = 8, fig.cap="" >>=
+options(scipen=0); options(digits=1)
+melt.samp_param <- melt(samp_param[seq(1,5000,2),],
+                        id.var = c("iter"),
+                        measure.var = c("V1", "V2", "V3", "V4","V5"))
+levels(melt.samp_param$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                      expression(paste(mu," (speed mean)")),
+                                      expression(paste(beta," (speed correlation)")),
+                                      expression(paste(sigma[psi]^2," (speed volatility)")),
+                                      expression(paste(sigma[epsilon]^2," (obs. error volatility)")))
+
+ggplot(data = melt.samp_param, aes(iter, value)) +
+  geom_line() +
+  facet_grid(variable ~ ., scales = "free", labeller = label_parsed) +
+  theme_bw() + xlab("Iteration") + ylab("")
+
+@
+
+<< param_scatter_1, fig.width = 10, fig.height = 6, fig.cap="" >>=
+options(digits=7)
+scat_1 <- ggplot(data = samp_param[-burn_in_rows,], aes(log(V1), log(V2))) +
+  geom_point(alpha = 1/5) +
+  xlab(expression(paste(ln(sigma[theta]^2)," (turn volatility)"))) +
+  ylab(expression(paste(ln(mu)," (speed mean)"))) +
+  theme_bw()
+
+scat_2 <- ggplot(data = samp_param[-burn_in_rows,], aes(log(V3), log(V4))) +
+  geom_point(alpha = 1/5) +
+  xlab(expression(paste(ln(beta)," (speed correlation)"))) +
+  ylab(expression(paste(ln(sigma[psi]^2)," (speed volatility)"))) +
+  theme_bw()
+
+grid.arrange(scat_1, scat_2, ncol = 2)
+@
+
+<< param_density, fig.height = 7, fig.width = 10, fig.cap="" >>=
+melt.samp_param <- melt(samp_param[-burn_in_rows,],
+                        id.var = c("iter"),
+                        measure.var = c("V1", "V2", "V3", "V4","V5"))
+levels(melt.samp_param$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                      expression(paste(mu," (speed mean)")),
+                                      expression(paste(beta," (speed correlation)")),
+                                      expression(paste(sigma[psi]^2," (speed volatility)")),
+                                      expression(paste(sigma[epsilon]^2," (obs. error volatility)")))
+
+library(pscl)
+library(fdrtool)
+prior <- data.frame(variable = c(rep(1,1000), rep(3,1000), rep(5,1000)),
+                    x = c(seq(0.001,5,length.out=1000), seq(0.001,3,length.out=1000), seq(0.001,400,length.out=1000)),
+                    y = c(densigamma(seq(0.001,5,length.out=1000),0.5,0.5), dhalfnorm(seq(0.001,3,length.out=1000), theta = sqrt(0.7)), densigamma(seq(0.001,400,length.out=1000),2,200)))
+prior$variable <- factor(prior$variable, levels = 1:5)
+
+levels(prior$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                      expression(paste(mu," (speed mean)")),
+                                      expression(paste(beta," (speed correlation)")),
+                                      expression(paste(sigma[psi]^2," (speed volatility)")),
+                                      expression(paste(sigma[epsilon]^2," (obs. error volatility)")))
+
+ggplot(data = melt.samp_param, aes(value)) +
+  geom_line(data = prior, aes(x,y), linetype = 2) +
+  geom_density() +
+  facet_wrap(~ variable, scales = "free", labeller = label_parsed, nrow = 2) +
+  theme_bw() + xlab("Iteration") + ylab("")
+@
+
+<< param_tables >>=
+box <- apply(samp_param[-burn_in_rows, 1:5], 2,
+             quantile, c(0,0.025,0.25,0.5,0.75,0.975,1))
+library(coda)
+m <- mcmc(samp_param[-burn_in_rows, 1:5])
+box <- rbind(box, effectiveSize(m))
+
+kable(t(round(box[c(2,4,6,8),], 3)),
+      col.names = c("2.5","50","97.5","Effective sample size"),
+      caption = "turn volatility table")
+@
+
+<< load sampled locations >>=
+samp_path <- read.table("../loc.txt", header = T)
+@
+
+<< samp_paths_all, fig.width = 7, fig.height = 10, fig.cap = "" >>=
+ggplot(data = samp_path[samp_path$V3 %in% seq(1000,5000,50), ], aes(V1, V2, group = V3)) +
+  geom_path(alpha = 1/4, colour = "#1b9e77") +
+  geom_point(data = obs, aes(x, y, group = 1), colour = "black") +
+  geom_path(data = initial_paths, aes(X, Y, group = 1), colour = "black") +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+@
+
+<< samp_paths_focus, fig.width = 12, fig.height = 10, fig.cap = "" >>=
+full <- ggplot(data = samp_path[samp_path$V3 %in% seq(1000,5000,1000), ], aes(V1, V2, group = V3)) +
+  annotate("rect", xmin = 697660, xmax = 697800, ymin = 7224810, ymax = 7224935, alpha=0.5, fill="grey") +
+  annotate("rect", xmin = 698025, xmax = 698125, ymin = 7224725, ymax = 7224890, alpha=0.5, fill="grey") +
+  geom_path(aes(linetype = factor(V3)), alpha = 1, colour = "black") +
+  geom_point(data = obs, aes(x, y, group = 1), colour = "black", size = 1) +
+  theme_bw() + coord_fixed(xlim = c(697680,698170), ylim = c(7224250,7225025)) + xlab("X") + ylab("Y") +
+  guides(linetype = "none")
+
+focus_1 <- ggplot(data = samp_path[samp_path$V3 %in% seq(1000,5000,1000), ], aes(V1, V2, group = V3)) +
+  geom_path(aes(linetype = factor(V3)), alpha = 1, colour = "black", na.rm = T) +
+  geom_point(data = obs[21:26, ], aes(x, y, group = 1), colour = "black", size = 2) +
+  theme_bw() + guides(linetype = "none") + xlab("") + ylab("") +
+  coord_fixed() + xlim(c(697665,697800)) + ylim(c(7224810,7224930)) +
+  geom_text(data = obs[21:26, ], aes(x, y, group = 1, label = 21:26),
+            color = "black", hjust = c(1.7,1.5,-0.5,-0.5,0.4,1.5), vjust = c(1,0,-1,-1,-0.5,-1), size = 4) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+focus_2 <- ggplot(data = samp_path[samp_path$V3 %in% seq(1000,5000,1000), ], aes(V1, V2, group = V3)) +
+  geom_path(aes(linetype = factor(V3)), alpha = 1, colour = "black", na.rm = T) +
+  geom_point(data = obs[39:44, ], aes(x, y, group = 1), colour = "black", size = 2) +
+  #scale_linetype_manual(values = 1:4) +
+  theme_bw() + guides(linetype = "none") + xlab("") + ylab("") +
+  coord_fixed() + xlim(c(697985,698125)) + ylim(c(7224725,7224885)) +
+  geom_text(data = obs[39:44, ], aes(x, y, group = 1, label = 39:44),
+            color = "black", hjust = c(1.9,1.5,1.5,1.2,1.5,-0.2), vjust = c(1.5,0.5,0.5,1.2,0.5,-0.2), size = 4) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+plot(focus_1, vp = viewport(width=0.42,height=0.5,x=1-0.5*0.45, y=0.75))
+plot(focus_2, vp = viewport(width=0.52,height=0.52,x=1-0.5*0.45, y=0.5*0.53))
+plot(full, vp = viewport(width=0.6,height=1,x=0.5*0.6,y=0.5))
+@
+
+<< acf_sim,fig.height = 8, fig.width = 8, fig.cap = "lag upto 50/5000">>=
+qacf(samp_param[-burn_in_rows, 1:5], title = "ACF", lag.max = 50)
+@
+
+<< central_obs_error, fig.height = 8, fig.width = 11 >>=
+p <- samp_path; p$e <- 0; q <- c()
+for(i in seq(1000,5000,10)){
+  p$e[(i-1)*393+seq(1,393,8)[39]] <- 1
+  p$e[(i-1)*393+seq(1,393,8)[35]] <- 2
+  q <- rbind(q,p[(i-1)*393+seq(1,393,8)[c(39,35)], ])
+}
+p <- p[p$V3 %in% seq(1000,5000,10), ]
+
+plot_1 <- ggplot(data = p, aes(V1, V2, group = V3)) +
+  geom_path(alpha = 1/10, na.rm = T, colour = "#1b9e77") +
+  geom_point(data = q, aes(V1, V2, group = V3), colour = "black", na.rm = T, size = 1) +
+  geom_point(data = obs[-c(39,35),], aes(x, y, group = 1), colour = "grey40", na.rm = T) +
+  geom_point(data = obs[c(39,35),], aes(x, y, group = 1), colour = "grey40", na.rm = T, shape = 15, size = 2) +
+  geom_path(data = obs, aes(x, y, group = 1), colour = "grey40", na.rm = T) +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y") +
+  xlim(c(697980,698110)) + ylim(c(7224820, 7225030)) +
+  geom_text(data = obs[c(39,35), ], aes(x, y, group = 1, label = c("A","B")),
+            color ="grey40", hjust = c(-7,-2.2), vjust = c(1,1), size = 5)
+
+oe <- c()
+locs <- samp_path
+for(j in seq(1000,5000,10)) {
+  oe <- rbind(oe, data.frame(x = locs[(j-1)*393 + seq(1,393,8)[c(39,35)], 1] - obs$x[c(39,35)],
+                             y = locs[(j-1)*393 + seq(1,393,8)[c(39,35)], 2] - obs$y[c(39,35)],
+                             i = c("A: Centred error","B: Non-centred error")))
+}
+
+plot_2 <- ggplot(data = oe, aes(x, y)) +
+  geom_hline(aes(yintercept = 0), colour = "grey40") + geom_vline(aes(xintercept = 0), colour = "grey40") +
+  geom_point() +
+  geom_point(data = data.frame(x=0,y=0), aes(x,y),colour = "grey40", shape = 15) +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y") +
+  facet_wrap(~ i, nrow = 3)
+
+plot(plot_1, vp = viewport(width=0.5,height=1,x=0.25, y=0.5))
+plot(plot_2, vp = viewport(width=0.5,height=1,x=0.75, y=0.5))
+@
+
+\end{document}
