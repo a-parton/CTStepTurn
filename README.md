@@ -44,7 +44,7 @@ Figures of the results of this example can be produced using the `single_reindee
 
 ## Authors
 
-* **Alison Parton** - *Initial work* - [PurpleBooth](https://alisonparton.co.uk).
+* **Alison Parton** - [personal webpage](https://alisonparton.co.uk).
 
 ## License
 
