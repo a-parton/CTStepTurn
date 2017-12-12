@@ -31,14 +31,33 @@ In some of the example implementations, the additional package is also required:
 
 ## Usage
 
-This package only provides the functions necessary to implement inference for continuous-time step-and-turn models. The full inference script will need to be created and run for a given instance. A number of example implementations are included that can be modified for use.
-
-### Example single_reindeer_error
-
-This example implements single state movement for a set of reindeer observations, with unknown, independent observation errors. To run this example, source the `single_reindeer_error/script.R` file. This file is broken up into a number of stages:
+This package only provides the functions necessary to implement inference for continuous-time step-and-turn models. The full inference script will need to be created and run for a given instance. A number of example implementations are included that can be modified for use. In all cases, the necessary script involves the following elements:
 1) The observed locations are read and initial values for the inference algorithm are assigned. Fixed constants relating to the specific scenario are set (e.g. number of behavioural states, prior distributions, pertubation variances).
 2) The MCMC algorithm is implemented. This involves a loop sampling parameters and refined path, and uses the functions from the package `CTStepTurn`.
 3) The results of the algorithm are stored as text files.
+
+### Example single_reindeer_error
+
+This example implements single state movement for a set of reindeer observations, with unknown, independent observation errors. To run this example, source the `single_reindeer_error/script.R` file. 
+
+1) In this case, the observations are given by `single_reindeer_error/observations.txt`. The initial refined path is created using `InitialPath.r` at a time scale of 0.25. For this example, the correlated step model is assumed (`indep_step = FALSE`) and independent observation error is assumed (`obs_error = TRUE`, `corr_obs_error = FALSE`). Initial parameters are set as estimates from the initial path. Perturbation variances and prior distributions are assigned using `FixedConstants.R`. The speed parameter prior is set as a function `calc_prior_speed_lik`. Variables detailing the run length of the MCMC algorithm are set.
+
+2) The MCMC algorithm is carried out as a for loop over the pre-set run length. Parameters are updated using 
+```
+update_speed_param()
+update_bearing_param()
+Gibbs_update_obs_error_param()
+```
+Refined path is updated using
+```
+draw_random_path_section()
+set_fixed_values()
+set_current_values()
+update_refined_path()
+```
+Samples of the parameters and path are stored.
+
+3) The results of the algorithm are written to text files to store.
 
 Figures of the results of this example can be produced using the `single_reindeer_error/plot_results/plot.Rnw` file. This is an R Sweave document that can be compiled in R to produce individual pdf's of each of the results figures. 
 
