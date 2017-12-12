@@ -1,7 +1,7 @@
 # Set a seed
 set.seed(1234)
 # Packages required
-library(gtools); library(msm); library(mvnfast); library(fdrtool)
+library(gtools); library(msm); library(mvnfast); #library(fdrtool)
 library(CTStepTurn)
 source("../FixedConstants.R"); source("../InitialPath.R")
 
