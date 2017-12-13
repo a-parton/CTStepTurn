@@ -61,6 +61,31 @@ Samples of the parameters and path are stored.
 
 Figures of the results of this example can be produced using the `single_reindeer_error/plot_results/plot.Rnw` file. This is an R Sweave document that can be compiled in R to produce individual pdf's of each of the results figures. 
 
+### Example single_simulation_error
+
+This example implements single state movement for a set of simulated observations. The observations were simulated with independent errors, with variance 25. Scripts are provided to carry out a number of implementation in which the error variance parameter is assumed known and fixed for this set of observations (ranging from 0-50). To run this example, source the `single_simulation_error/script_X.R` file, where `X` is the fixed error variance. 
+
+1) In this case, the observations are given by `single_simulation_error/noisy_observations.txt`. The initial refined path is created using `InitialPath.r` at a time scale of 0.25. For this example, the correlated step model is assumed (`indep_step = FALSE`) and independent observation error is assumed (`obs_error = TRUE`, `corr_obs_error = FALSE`). Initial parameters are set as estimates from the initial path. Perturbation variances and prior distributions are assigned using `FixedConstants.R`. The speed parameter prior is set as a function `calc_prior_speed_lik`. Variables detailing the run length of the MCMC algorithm are set.
+
+2) The MCMC algorithm is carried out as a for loop over the pre-set run length. Parameters are updated using 
+```
+update_speed_param()
+update_bearing_param()
+```
+Note that `Gibbs_update_obs_error_param()` is not implemented in this example because the error variance parameter is assumed known and fixed, so is not updated.
+Refined path is updated using
+```
+draw_random_path_section()
+set_fixed_values()
+set_current_values()
+update_refined_path()
+```
+Samples of the parameters and path are stored.
+
+3) The results of the algorithm are written to text files to store.
+
+Figures of the results of this example can be produced using the `single_simulation_error/plot_results/plot.Rnw` file. This is an R Sweave document that can be compiled in R to produce individual pdf's of each of the results figures. Note that this relies on having implemented all included scripts to plot and compare the results.
+
 ## Authors
 
 * **Alison Parton** - [personal webpage](http://alisonparton.co.uk/).

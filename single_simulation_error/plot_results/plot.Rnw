@@ -1,0 +1,448 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
+\usepackage{setspace}
+\doublespacing
+\usepackage{amsmath}
+\usepackage{pdflscape}
+
+\title{Observation error simulation example}
+\author{Alison Parton}
+\date{December 2017}
+
+\begin{document}
+%\SweaveOpts{concordance=TRUE}
+\let\B\boldsymbol
+
+<<setup, include=FALSE, cache=FALSE>>=
+library(knitr)
+# set global chunk options
+opts_chunk$set(fig.path='figure/minimal-', fig.align='center', fig.show='hold')
+options(formatR.arrow=TRUE,width=90)
+knitr::opts_chunk$set(echo = FALSE)
+library(psych) # required for displaying head and tail of a dataframe together
+library(ggplot2) # required for graphics
+library(grid) # required to plot mutliple things together
+library(reshape2)
+library(gridExtra)
+#source("qacf.R") # function to plot acf in ggplot2
+library(coda)
+library(lattice)
+@
+
+\maketitle
+<< sim_path >>=
+simulated_path <- read.table("../simulated_path.txt", header = TRUE)
+
+kable(headTail(simulated_path[, c(3,1,2,4,5)], hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extract of the simulated true path.",
+      col.names=c("Time","Bearing","Step","X","Y"))
+@
+
+<< obs >>=
+true_obs <- read.table("../true_observations.txt", header = TRUE)
+
+kable(headTail(true_obs, hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extracts of the true observed locations.",
+      col.names=c("Time","X","Y"))
+
+noisy_obs <- read.table("../noisy_observations.txt", header = TRUE)
+
+kable(headTail(noisy_obs, hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extracts of the noisy observed locations.",
+      col.names=c("Time","X","Y"))
+@
+
+<< sim_obs_plot, fig.height = 7, fig.width = 10, fig.cap = "" >>=
+p <- ggplot(data = simulated_path, aes(X, Y)) +
+  geom_path() +
+  geom_point(data = true_obs, aes(x, y)) +
+  geom_point(data = noisy_obs, aes(x, y), colour = "#1b9e77") +
+  theme_bw() + coord_fixed(xlim = c(-900,550),ylim = c(-400,550)) +
+  geom_rect(aes(ymin = -40, ymax = 225, xmin = -170, xmax = 40), fill = NA, colour = "grey50") +
+  geom_line(data = data.frame(a = c(-150,60), b = c(-50,-270)), aes(a,b), colour = "grey50") +
+  geom_line(data = data.frame(a = c(-150,60), b = c(240,360)), aes(a,b), colour = "grey50")
+
+q <- ggplot(data = simulated_path, aes(X, Y)) +
+  geom_path() +
+  geom_point(data = true_obs, aes(x, y)) +
+  geom_point(data = noisy_obs, aes(x, y), colour = "#1b9e77") +
+  theme_bw() +
+  coord_fixed(xlim = c(-165,30), ylim = c(-30,210)) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())
+
+vp <- viewport(width = 0.5,
+               height = 0.55,
+               x = 0.82,
+               y = 0.5)
+print(p)
+print(q, vp = vp)
+@
+
+<< load sampled parameters >>=
+para <- rbind(cbind(read.table("../move_param_0.txt", header = T),V5=rep(0,5000)),
+              read.table("../move_param_5.txt", header = T),
+              read.table("../move_param_10.txt", header = T),
+              read.table("../move_param_15.txt", header = T),
+              read.table("../move_param_20.txt", header = T),
+              read.table("../move_param_25.txt", header = T),
+              read.table("../move_param_30.txt", header = T),
+              read.table("../move_param_35.txt", header = T),
+              read.table("../move_param_40.txt", header = T),
+              read.table("../move_param_45.txt", header = T),
+              read.table("../move_param_50.txt", header = T))
+para$err <- c(rep(c("00","05","10","15","20","25","30","35","40","45","50"),rep(5000,11)))
+para$iter <- rep(1:5000, 11)
+burn_in <- c()
+for(i in 1:11) {
+  burn_in <- c(burn_in, 1:500 + (5000 * (i-1)))
+}
+@
+
+<< param_trace, fig.width = 20, fig.height = 12, fig.cap="" >>=
+#options(scipen=0); options(digits=1)
+melt.samp_param <- melt(para,
+                        id.var = c("iter", "err"),
+                        measure.var = c("V1", "V2", "V3", "V4"))
+levels(melt.samp_param$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                      expression(paste(mu," (speed mean)")),
+                                      expression(paste(beta," (speed correlation)")),
+                                      expression(paste(sigma[psi]^2," (speed volatility)")))
+true_param <- data.frame(variable = levels(melt.samp_param$variable), z = c(0.7,20,0.2,80))
+
+ggplot(data = melt.samp_param, aes(iter, value)) +
+  geom_hline(data = true_param, aes(yintercept = z), colour = "#1b9e77") +
+  geom_line(na.rm = T, alpha = 0.7) +
+  facet_grid(variable ~ err, scales = "free", labeller = label_parsed) +
+  theme_bw() +
+  xlab("Iteration") + ylab("") +
+  guides(colour = "none")
+@
+
+<< param_scatter_1, fig.cap="", fig.height = 10, fig.width = 10 >>=
+#options(digits=7)
+ggplot(data = para[-burn_in, ], aes(log(V1), log(V2))) +
+  geom_vline(xintercept = log(true_param[1,2]), alpha = 1/2) +
+  geom_hline(yintercept = log(true_param[2,2]), alpha = 1/2) +
+  geom_point(alpha = 1/4, size = 0.8, na.rm = T) + facet_wrap(~ err, nrow = 4) +
+  ylim(c(2,3.5)) +
+  xlab(expression(paste(ln(sigma[theta]^2)," (turn volatility)"))) +
+  ylab(expression(paste(ln(mu)," (speed mean)"))) +
+  theme_bw()
+@
+
+<< param_scatter_2, fig.cap="", fig.height = 9, fig.width = 10 >>=
+
+ggplot(data = para[-burn_in, ], aes(log(V3), log(V4))) +
+  geom_vline(xintercept = log(true_param[3,2]), alpha = 1/2) +
+  geom_hline(yintercept = log(true_param[4,2]), alpha = 1/2) +
+  geom_point(alpha = 1/4, size = 0.8) + facet_wrap(~ err, nrow = 4) +
+  xlab(expression(paste(ln(beta)," (speed correlation)"))) +
+  ylab(expression(paste(ln(sigma[psi]^2)," (speed volatility)"))) +
+  theme_bw()
+@
+
+<< param_density, fig.height = 10, fig.width = 10, fig.cap="" >>=
+
+melt.samp_param <- melt(para[-burn_in, ],
+                        id.var = c("iter", "err"),
+                        measure.var = c("V1", "V2", "V3", "V4"))
+levels(melt.samp_param$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                      expression(paste(mu," (speed mean)")),
+                                      expression(paste(beta," (speed correlation)")),
+                                      expression(paste(sigma[psi]^2," (speed volatility)")))
+
+ggplot(data = melt.samp_param, aes(value, colour = err)) +
+  geom_vline(data = true_param, aes(xintercept = z), alpha = 1/2) +
+  stat_density(geom="line",position="identity") +
+  #geom_density(na.rm = T) +
+  theme_bw() + xlab("") +
+  scale_colour_discrete(name = "Error\nVariance") +
+  facet_wrap(~ variable, scales = "free", ncol = 2, labeller = label_parsed)
+@
+
+<< param_tables >>=
+r <- c("00","05","10","15","20","25","30","35","40","45","50")
+box_1 <- box_2 <- box_3 <- box_4 <- box_5 <- matrix(NA, nrow = 11, ncol = 7)
+rownames(box_1) <- rownames(box_2) <- rownames(box_3) <- rownames(box_4) <- rownames(box_5) <- r
+colnames(box_1) <- colnames(box_2) <- colnames(box_3) <- colnames(box_4) <- colnames(box_5) <- c("min","q2.5","q25","q50","q75","q97.5","max")
+
+for(i in 1:11) {
+  box_1[i, ] <- quantile(subset(para[-burn_in,]$V1,para[-burn_in,]$err == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+  box_2[i, ] <- quantile(subset(para[-burn_in,]$V2,para[-burn_in,]$err == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+  box_3[i, ] <- quantile(subset(para[-burn_in,]$V3,para[-burn_in,]$err == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+  box_4[i, ] <- quantile(subset(para[-burn_in,]$V4,para[-burn_in,]$err == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+  box_5[i, ] <- quantile(subset(para[-burn_in,]$V5,para[-burn_in,]$err == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1), na.rm=T)
+}
+@
+
+<< param_tab_1 >>=
+kable(round(box_1[,c(2,4,6)],3),
+      col.names = c("2.5","50","97.5"),
+      caption = "turn volatility table")
+
+kable(round(box_2[,c(2,4,6)],3),
+      col.names = c("2.5","50","97.5"),
+      caption = "mean speed table")
+
+kable(round(box_3[,c(2,4,6)],3),
+      col.names = c("2.5","50","97.5"),
+      caption = "speed correlation table")
+
+kable(round(box_4[,c(2,4,6)],3),
+      col.names = c("2.5","50","97.5"),
+      caption = "speed variance table")
+@
+
+<< param_boxplots, fig.cap="" >>=
+# Compute boxplot statistics
+f <- function(x) {
+  r <- quantile(x, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+
+ggplot(data = melt.samp_param, aes(err, value)) +
+  geom_hline(data = true_param, aes(yintercept = z), alpha = 1/2) +
+  stat_summary(fun.data = f, geom="boxplot") +
+  facet_grid(variable ~ ., scales = "free", labeller = label_parsed) +
+  theme_bw() + xlab("") + ylab("")
+
+@
+
+<< load sampled locations >>=
+samp_path <- rbind(
+  read.table("../loc_0.txt", header = T),
+  read.table("../loc_5.txt", header = T),
+  read.table("../loc_25.txt", header = T),
+  read.table("../loc_50.txt", header = T)
+  )
+samp_path$run <- factor(c(rep("00",8005000),
+                          rep("05",8005000),
+                          rep("25",8005000),
+                          rep("50",8005000)))
+@
+
+<< smoothing_of_paths_with_error, fig.width = 11, fig.height = 12, fig.cap = "" >>=
+red_paths <- samp_path[samp_path$V3 %in% seq(1000,5000,250), ]
+
+ggplot(data = red_paths, aes(V1, V2, group = V3)) +
+  #geom_path(data = simulated_path, aes(X, Y, group = 1), colour = "#1b9e77") +
+  geom_path(colour = "#1b9e77") +
+  geom_point(data = true_obs, aes(x, y, group = 1), colour = "black") +
+  geom_point(data = noisy_obs, aes(x, y, group = 1), colour = "black", shape = 15) +
+  geom_line(data = rbind(true_obs,noisy_obs), aes(x, y, group = times), colour = "black") +
+  theme_bw() + xlab("X") + ylab("Y") +
+  facet_wrap(~ run, nrow = 2) +
+  coord_fixed(xlim = c(-180,30), ylim = c(-30,210)) +
+  guides(linetype = "none")
+@
+
+<< load sampled locations at observation times >>=
+samp_path <- rbind(
+  read.table("../loc_obs_5.txt", header = T),
+  read.table("../loc_obs_10.txt", header = T),
+  read.table("../loc_obs_15.txt", header = T),
+  read.table("../loc_obs_20.txt", header = T),
+  read.table("../loc_obs_25.txt", header = T),
+  read.table("../loc_obs_30.txt", header = T),
+  read.table("../loc_obs_35.txt", header = T),
+  read.table("../loc_obs_40.txt", header = T),
+  read.table("../loc_obs_45.txt", header = T),
+  read.table("../loc_obs_50.txt", header = T)
+  )
+samp_path$err <- c(rep(c("05","10","15","20","25","30","35","40","45","50"),
+                       rep(1005000,10)))
+@
+
+<< small_actual_error, fig.cap = "", fig.height = 10.5, fig.width = 8 >>==
+k = 51
+s <- data.frame(V1 = rep(NA, 100000*10), V2 = rep(NA, 100000*10),
+                err = rep(NA, 100000*10))
+for(i in 1:10) {
+  j <- c("05","10","15","20","25","30","35","40","45","50")[i]
+  s$V1[1:100000 + (100000 * (i-1))] <- rnorm(100000,noisy_obs$x[k],sqrt(as.numeric(j)))
+  s$V2[1:100000 + (100000 * (i-1))] <- rnorm(100000,noisy_obs$y[k],sqrt(as.numeric(j)))
+  s$err[1:100000 + (100000 * (i-1))] <- j
+}
+
+point_51 <- samp_path[samp_path$V4 == k, ]
+c_95 <- c_50 <- c_75 <- data.frame(level = NA, x = NA, y = NA, err = NA)
+for(i in 1:10) {
+  j <- c("05","10","15","20","25","30","35","40","45","50")[i]
+  kd <- ks::kde(point_51[point_51$err == j, 1:2], compute.cont=TRUE, H=matrix(c(10,0,0,10),nrow=2))
+
+  contour_95 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["5%"])[[1]])
+  contour_95 <- data.frame(contour_95)
+  contour_95$err <- rep(j, nrow(contour_95))
+  c_95 <- rbind(c_95, contour_95)
+
+  contour_75 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["25%"])[[1]])
+  contour_75 <- data.frame(contour_75)
+  contour_75$err <- rep(j, nrow(contour_75))
+  c_75 <- rbind(c_75, contour_75)
+
+  contour_50 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["50%"])[[1]])
+  contour_50 <- data.frame(contour_50)
+  contour_50$err <- rep(j, nrow(contour_50))
+  c_50 <- rbind(c_50, contour_50)
+}
+c_95 <- c_95[-1, ]; c_75 <- c_75[-1, ]; c_50 <- c_50[-1, ]
+
+ggplot(data = point_51[point_51$V3 %in% seq(500,5000,10), ], aes(V1, V2)) +
+  geom_point(colour = "#1b9e77", size = 0.8) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.95) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.75) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.5) +
+  geom_path(data = c_95, aes(x, y)) +
+  geom_path(data = c_75, aes(x, y)) +
+  geom_path(data = c_50, aes(x, y)) +
+  geom_point(data = true_obs[k, ], aes(x, y)) +
+  geom_point(data = noisy_obs[k, ], aes(x, y), shape = 15) +
+  facet_wrap(~ err, nrow = 4) +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+@
+
+<< middle_actual_error, fig.cap = "", fig.height = 10.5, fig.width = 8 >>==
+k = 157
+s <- data.frame(V1 = rep(NA, 100000*10), V2 = rep(NA, 100000*10),
+                err = rep(NA, 100000*10))
+for(i in 1:10) {
+  j <- c("05","10","15","20","25","30","35","40","45","50")[i]
+  s$V1[1:100000 + (100000 * (i-1))] <- rnorm(100000,noisy_obs$x[k],sqrt(as.numeric(j)))
+  s$V2[1:100000 + (100000 * (i-1))] <- rnorm(100000,noisy_obs$y[k],sqrt(as.numeric(j)))
+  s$err[1:100000 + (100000 * (i-1))] <- j
+}
+
+point_157 <- samp_path[samp_path$V4 == k, ]
+c_95 <- c_50 <- c_75 <- data.frame(level = NA, x = NA, y = NA, err = NA)
+for(i in 1:10) {
+  j <- c("05","10","15","20","25","30","35","40","45","50")[i]
+  kd <- ks::kde(point_157[point_157$err == j, 1:2], compute.cont=TRUE, H=matrix(c(10,0,0,10),nrow=2))
+
+  contour_95 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["5%"])[[1]])
+  contour_95 <- data.frame(contour_95)
+  contour_95$err <- rep(j, nrow(contour_95))
+  c_95 <- rbind(c_95, contour_95)
+
+  contour_75 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["25%"])[[1]])
+  contour_75 <- data.frame(contour_75)
+  contour_75$err <- rep(j, nrow(contour_75))
+  c_75 <- rbind(c_75, contour_75)
+
+  contour_50 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["50%"])[[1]])
+  contour_50 <- data.frame(contour_50)
+  contour_50$err <- rep(j, nrow(contour_50))
+  c_50 <- rbind(c_50, contour_50)
+}
+c_95 <- c_95[-1, ]; c_75 <- c_75[-1, ]; c_50 <- c_50[-1, ]
+
+ggplot(data = point_157[point_157$V3 %in% seq(500,5000,10), ], aes(V1, V2)) +
+  geom_point(colour = "#1b9e77", size = 0.8) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.95) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.75) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.5) +
+  geom_path(data = c_95, aes(x, y)) +
+  geom_path(data = c_75, aes(x, y)) +
+  geom_path(data = c_50, aes(x, y)) +
+  geom_point(data = true_obs[k, ], aes(x, y)) +
+  geom_point(data = noisy_obs[k, ], aes(x, y), shape = 15) +
+  facet_wrap(~ err, nrow = 4) +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+
+# ggplot(data = samp_path[samp_path$V4 == k, ], aes(V1, V2)) +
+#   geom_point(colour = "#1b9e77", size = 0.8) +
+#   stat_ellipse(data = s, colour = '#d95f02', level = 0.95) +
+#   stat_ellipse(data = s, colour = '#d95f02', level = 0.75) +
+#   stat_ellipse(data = s, colour = '#d95f02', level = 0.5) +
+#   stat_ellipse(level = 0.95) +
+#   stat_ellipse(level = 0.75) +
+#   stat_ellipse(level = 0.5) +
+#   geom_point(data = true_obs[k, ], aes(x, y)) +
+#   geom_point(data = noisy_obs[k, ], aes(x, y), shape = 15) +
+#   facet_wrap(~ err, nrow = 4) +
+#   theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+@
+
+<< large_actual_error, fig.cap = "", fig.height = 11, fig.width = 8 >>==
+k = 17
+s <- data.frame(V1 = rep(NA, 100000*10), V2 = rep(NA, 100000*10),
+                err = rep(NA, 100000*10))
+for(i in 1:10) {
+  j <- c("05","10","15","20","25","30","35","40","45","50")[i]
+  s$V1[1:100000 + (100000 * (i-1))] <- rnorm(100000,noisy_obs$x[k],sqrt(as.numeric(j)))
+  s$V2[1:100000 + (100000 * (i-1))] <- rnorm(100000,noisy_obs$y[k],sqrt(as.numeric(j)))
+  s$err[1:100000 + (100000 * (i-1))] <- j
+}
+
+point_17 <- samp_path[samp_path$V4 == k, ]
+c_95 <- c_50 <- c_75 <- data.frame(level = NA, x = NA, y = NA, err = NA)
+for(i in 1:10) {
+  j <- c("05","10","15","20","25","30","35","40","45","50")[i]
+  kd <- ks::kde(point_17[point_17$err == j, 1:2], compute.cont=TRUE, H=matrix(c(10,0,0,10),nrow=2))
+
+  contour_95 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["5%"])[[1]])
+  contour_95 <- data.frame(contour_95)
+  contour_95$err <- rep(j, nrow(contour_95))
+  c_95 <- rbind(c_95, contour_95)
+
+  contour_75 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["25%"])[[1]])
+  contour_75 <- data.frame(contour_75)
+  contour_75$err <- rep(j, nrow(contour_75))
+  c_75 <- rbind(c_75, contour_75)
+
+  contour_50 <- with(kd, contourLines(x=eval.points[[1]], y=eval.points[[2]],
+                                    z=estimate, levels=cont["50%"])[[1]])
+  contour_50 <- data.frame(contour_50)
+  contour_50$err <- rep(j, nrow(contour_50))
+  c_50 <- rbind(c_50, contour_50)
+}
+c_95 <- c_95[-1, ]; c_75 <- c_75[-1, ]; c_50 <- c_50[-1, ]
+
+ggplot(data = point_17[point_17$V3 %in% seq(500,5000,10), ], aes(V1, V2)) +
+  geom_point(colour = "#1b9e77", size = 0.8) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.95) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.75) +
+  stat_ellipse(data = s, colour = '#d95f02', level = 0.5) +
+  geom_path(data = c_95, aes(x, y)) +
+  geom_path(data = c_75, aes(x, y)) +
+  geom_path(data = c_50, aes(x, y)) +
+  geom_point(data = true_obs[k, ], aes(x, y)) +
+  geom_point(data = noisy_obs[k, ], aes(x, y), shape = 15) +
+  facet_wrap(~ err, nrow = 4) +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+
+# ggplot(data = samp_path[samp_path$V4 == k, ], aes(V1, V2)) +
+#   geom_point(colour = "#1b9e77", size = 0.8) +
+#   stat_ellipse(data = s, colour = '#d95f02', level = 0.95) +
+#   stat_ellipse(data = s, colour = '#d95f02', level = 0.75) +
+#   stat_ellipse(data = s, colour = '#d95f02', level = 0.5) +
+#   stat_ellipse(level = 0.95) +
+#   stat_ellipse(level = 0.75) +
+#   stat_ellipse(level = 0.5) +
+#   geom_point(data = true_obs[k, ], aes(x, y)) +
+#   geom_point(data = noisy_obs[k, ], aes(x, y), shape = 15) +
+#   facet_wrap(~ err, nrow = 4) +
+#   theme_bw() + coord_fixed() + xlab("X") + ylab("Y")
+@
+
+\end{document}
