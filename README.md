@@ -36,6 +36,31 @@ This package only provides the functions necessary to implement inference for co
 2) The MCMC algorithm is implemented. This involves a loop sampling parameters and refined path, and uses the functions from the package `CTStepTurn`.
 3) The results of the algorithm are stored as text files.
 
+### Example single_simulation
+
+This example implements single state movement for a set of simulated observations assuming the independent step model (all other examples below use correlated steps). Four implementations are included that use a different refined time scale. Refined time scales at the simulation time (0.01) and observation time (5) only implement parameter updates because the refined path is known. Refined time scales of 1 and 0.5 implement the full algorithm. To run this example, source the `single_simulation/script_sim.R`, `single_simulation/script_half.R`, `single_simulation/script_one.R`, `single_simulation/script_obs.R` files. 
+
+1) In this case, the observations are given by `single_simulation/observations.txt`. The initial refined path is created using `InitialPath.r`. For this example, the independent step model is assumed (`indep_step = TRUE`) and no observation error is assumed (`obs_error = FALSE`, `corr_obs_error = FALSE`). Initial parameters are set as estimates from the initial path. Perturbation variances and prior distributions are assigned using `FixedConstants.R`. The speed parameter prior is set as a function `calc_prior_speed_lik`. Variables detailing the run length of the MCMC algorithm are set.
+
+2) The MCMC algorithm is carried out as a for loop over the pre-set run length. Parameters are updated using 
+```
+update_speed_param()
+update_bearing_param()
+```
+Note that `Gibbs_update_obs_error_param()` is not implemented as no error is assumed here.
+Refined path (only in the `half` and `one` cases) is updated using
+```
+draw_random_path_section()
+set_fixed_values()
+set_current_values()
+update_refined_path()
+```
+Samples of the parameters and path are stored.
+
+3) The results of the algorithm are written to text files to store.
+
+Figures of the results of this example can be produced using the `single_simulation/plot_results/plot.Rnw` file. This is an R Sweave document that can be compiled in R to produce individual pdf's of each of the results figures. Note that this relies on having implemented all included scripts to plot and compare the results.
+
 ### Example single_reindeer_error
 
 This example implements single state movement for a set of reindeer observations, with unknown, independent observation errors. To run this example, source the `single_reindeer_error/script.R` file. 

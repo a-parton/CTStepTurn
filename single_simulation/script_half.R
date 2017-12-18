@@ -10,13 +10,19 @@ obs <- as.list(read.table("observations.txt", header = T))
 obs$time_diffs <- diff(obs$times)
 
 # Set initial refined path
-refined_path <- InitialPath(obs, time_scale = 0.1, error = TRUE, corr_error = FALSE, error_para = 25)
+refined_path <- InitialPath(obs, time_scale = 0.5, error = FALSE, corr_error = FALSE)
 obs$index_on_refined_path <- which(refined_path$times %in% obs$times)
+write.table(list(times = refined_path$times,
+                 bearings = c(refined_path$bearings, NA),
+                 steps = c(refined_path$steps, NA),
+                 X = refined_path$X,
+                 Y = refined_path$Y),
+            "initial_path_half.txt", row.names = F)
 
 # Set initial parameters - also need behaviour parameters if applicable
-move_params <-  c(var(diff(refined_path$bearings))/1,
-                  mean(refined_path$steps)/1,
-                  var(refined_path$steps)/1)
+move_params <-  c(var(diff(refined_path$bearings))/0.5,
+                  mean(refined_path$steps)/0.5,
+                  var(refined_path$steps)/0.5)
 
 # Assign the fixed constants
 fixed_constant <- FixedConstants(pert_sd = sqrt(c(0.2, 5)), error_pert_sd = NULL,
@@ -100,18 +106,14 @@ for (i in 1:num_iterations) {
 
     stored_move_params[i / thin, ] <- move_params
     stored_refined_path[[i / thin]] <- refined_path
-
-    if (i %% (thin * 10) == 0) {
-      save.image("results.RData")
-    }
   }
 }
 ############################################
 
-save.image("results.RData")
-write.table(stored_move_params, file = "move_param.txt", row.names = F)
+save.image("results_half.RData")
+write.table(stored_move_params, file = "move_param_half.txt", row.names = F)
 write.table(c(speed_param_count, speed_param_count / (num_iterations / num_extra_path_updates),
-              refined_path_count, refined_path_count / num_iterations), file = "acceptance.txt", row.names = F)
+              refined_path_count, refined_path_count / num_iterations), file = "acceptance_half.txt", row.names = F)
 n <- num_iterations / thin
 l <- length(refined_path$X)
 samp_bearings <- matrix(NA, nrow = n, ncol = length(refined_path$bearings))
@@ -119,11 +121,11 @@ samp_steps<- matrix(NA, nrow = n, ncol = length(refined_path$bearings))
 samp_loc <- matrix(NA, nrow = n*l, ncol = 3)
 for(i in 1:n){
   samp_bearings[i, ] <- stored_refined_path[[i]]$bearings
-  samp_steps[i, ] <- stored_refined_path[[j]]$steps
+  samp_steps[i, ] <- stored_refined_path[[i]]$steps
   samp_loc[((i-1)*l+1):(i*l),1] <- stored_refined_path[[i]]$X
   samp_loc[((i-1)*l+1):(i*l),2] <- stored_refined_path[[i]]$Y
   samp_loc[((i-1)*l+1):(i*l),3] <- i
 }
-write.table(samp_bearings, "bearings.txt", row.names = F)
-write.table(samp_steps, "steps.txt", row.names = F)
-write.table(samp_loc, "loc.txt", row.names = F)
+write.table(samp_bearings, "bearings_half.txt", row.names = F)
+write.table(samp_steps, "steps_half.txt", row.names = F)
+write.table(samp_loc, "loc_half.txt", row.names = F)

@@ -1,0 +1,298 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
+\usepackage{setspace}
+\doublespacing
+\usepackage{amsmath}
+\usepackage{pdflscape}
+
+\title{Single state independent steps simulation example}
+\author{Alison Parton}
+\date{December 2017}
+
+\begin{document}
+%\SweaveOpts{concordance=TRUE}
+\let\B\boldsymbol
+
+<<setup, include=FALSE, cache=FALSE>>=
+library(knitr)
+# set global chunk options
+opts_chunk$set(fig.path='figure/minimal-', fig.align='center', fig.show='hold')
+options(formatR.arrow=TRUE,width=90)
+knitr::opts_chunk$set(echo = FALSE)
+library(psych) # required for displaying head and tail of a dataframe together
+library(ggplot2) # required for graphics
+library(grid) # required to plot mutliple things together
+library(reshape2)
+library(gridExtra)
+source("qacf.R") # function to plot acf in ggplot2
+library(coda)
+library(lattice)
+@
+
+\maketitle
+
+<< sim_path >>=
+simulated_path <- read.table("../simulated_path.txt", header = TRUE)
+
+kable(headTail(simulated_path[, c(3,1,2,4,5)], hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extract of the simulated true path.",
+      col.names=c("Time","Bearing","Step","X","Y"))
+@
+
+<< obs >>=
+obs <- read.table("../observations.txt", header = TRUE)
+
+kable(headTail(obs[, c(3,1,2)], hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extracts of the observed locations.",
+      col.names=c("Time","X","Y"))
+@
+
+<< sim_obs_plot, fig.height = 7, fig.width = 9, fig.cap = "Simulated path of single state movement using the independent steps model (solid line) with locations to be used as observations (points)." >>=
+ggplot(data = simulated_path, aes(X, Y)) + geom_path() +
+    geom_point(data = obs, aes(x, y)) +
+    theme_bw() + coord_fixed()
+@
+
+<< load initial data >>=
+initial_paths <- rbind(
+  read.table("../initial_path_obs.txt", header = T),
+  read.table("../initial_path_obs.txt", header = T),
+  read.table("../initial_path_half.txt", header = T),
+  read.table("../simulated_path.txt", header = T)
+  )
+
+initial_paths$speeds <- initial_paths$steps / c(rep(5, 101),
+                                                rep(1, 501),
+                                                rep(0.5, 1001),
+                                                rep(0.01, 50001))
+initial_paths$turns <- c(diff(initial_paths$bearings[1:101]), NA,
+                         diff(initial_paths$bearings[102:602]), NA,
+                         diff(initial_paths$bearings[603:1603]), NA,
+                         diff(initial_paths$bearings[1604:51604]), NA)
+
+initial_paths$run <- factor(c(rep("5 (Obs)", 101),
+                       rep("1", 501),
+                       rep("0.5", 1001),
+                       rep("0.01 (Sim)", 50001)))
+
+#cols <- c("#c7e9b4", "#7fcdbb", "#41b6c4", "#2c7fb8", "#253494")
+#cols <- rev(c("#fdcc8a", "#fc8d59", "#d7301f", "black"))
+cols <- rev(c("#e41a1c","#377eb8","#4daf4a", "black"))
+@
+
+<< initial_paths, fig.height = 7, fig.width = 6, fig.cap = "Small section (between the times 0--30) of the initial movement paths used within the example of a simulated path of single state movement with independent steps. When the refined time scale is the same as the observations, the movement path is fixed. When the refined time scale is the same as the simulation, the true simulated path is assumed known and fixed. When the refined time scale is 1 and 0.5, the movement path is reconstructed, with initial paths given here, created using interpolating splines between observed locations. The smoothness of the interpolating spline results in two paths that are almost intistinguishable here.">>=
+ip <- ggplot(data = initial_paths, aes(X, Y)) +
+  geom_path(na.rm = T, aes(linetype = factor(run))) +
+  geom_point(data = obs, aes(x, y, group = 1), na.rm = T, color = "black", size = 2) +
+  theme_bw() + xlab("X") + ylab("Y") +
+  scale_linetype_manual(name = "Refined time scale", values = c("solid","dashed","dotdash","dotted")) +
+  theme(legend.position="top") +
+  coord_fixed(xlim = c(-80, 400), ylim = c(-510, 10))
+print(ip)
+@
+
+<< initial_bear_speed, fig.cap = "Small section (between the times 0--30) of the initial movement paths (as bearings and speeds) used within the example of a simulated path of single state movement with independent steps. When the refined time scale is the same as the observations, the movement path is fixed. When the refined time scale is the same as the simulation, the true simulated path is assumed known and fixed. When the refined time scale is 1 and 0.5, the movement path is reconstructed, with initial values given here, created using interpolating splines between observed locations. The smoothness of the interpolating spline results in two paths that are almost intistinguishable here." >>=
+melt.red_init_paths <- melt(initial_paths[initial_paths$times >= 0 & initial_paths$times <= 30,],
+                            id.var = c("times","run"),
+                            measure.var = c("bearings","speeds"))
+
+levels(melt.red_init_paths$variable) <- c(expression(paste(theta," (bearing)")),
+                                          expression(paste(psi," (speed)")))
+
+init_bear_step <- ggplot(data = melt.red_init_paths, aes(times, value)) +
+  geom_step(aes(linetype = run, colour = run)) +
+  facet_grid(variable ~ ., scales = "free", labeller=label_parsed) +
+  theme_bw() + theme(legend.position="top") +
+  xlab("Time") + ylab("") +
+  scale_linetype_manual(name = "Refined time scale", values = c("solid","dashed","dotdash","dotted")) +
+  scale_colour_manual(name = "Refined time scale", values = c("grey","black","black","black"))
+
+init_bear_step
+@
+
+<< load sampled parameters >>=
+samp_param <- rbind(
+  read.table("../move_param_obs.txt", header = T),
+  read.table("../move_param_one.txt", header = T),
+  read.table("../move_param_half.txt", header = T),
+  read.table("../move_param_sim.txt", header = T)
+  )
+samp_param$iter <- c(seq(1, 10^5, 10^2),
+                     seq(1, 4*10^6, 10^3),
+                     seq(1, 4*10^6, 10^3),
+                     seq(1, 10^5, 10^2))
+samp_param$run <- factor(c(rep("5 (Obs)",1000),
+                       rep("1",4000),
+                       rep("0.5",4000),
+                       rep("0.01 (Sim)",1000)))
+burn_in_rows <- c(1:125,1001:1500,5001:5500,9001:9125)
+# take the first 1/8 of the run as burn-in
+@
+
+<< param_trace, fig.width = 12, fig.height = 10, fig.cap="Trace plots of the sampled movement parameters (thinned) in the single state movement with independent steps simulation (coloured lines). True parameter values used for the simulation are highlighted (horizontal lines)." >>=
+options(scipen=0); options(digits=1)
+melt.samp_param <- melt(samp_param,
+                        id.var = c("iter", "run"),
+                        measure.var = c("V1", "V2", "V3"))
+levels(melt.samp_param$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                      expression(paste(mu," (speed mean)")),
+                                      expression(paste(sigma[varphi]^2," (speed volatility)")))
+true_param <- data.frame(variable = levels(melt.samp_param$variable), z = c(0.5,50,30))
+
+ggplot(data = melt.samp_param, aes(iter, value)) +
+  geom_hline(data = true_param, aes(yintercept = z), alpha = 1/2) +
+  geom_line() +
+  facet_grid(variable ~ run, scales = "free", labeller = label_parsed) +
+  theme_bw() +
+  xlab("Iteration") + ylab("")
+@
+
+<< param_scatter_1, fig.cap="Scatter plots of the (log) sampled turn volatility against mean speed (thinned and with burn-in time omitted) for the single state movement with independent steps simulation (points), with true parameter values used for the simulation (lines)." >>=
+options(digits=7)
+scat_1 <- ggplot(data = samp_param[-burn_in_rows,], aes(log(V1), log(V2))) +
+  geom_vline(xintercept = log(0.5), alpha = 1/2) +
+  geom_hline(yintercept = log(50), alpha = 1/2) +
+  geom_point(alpha = 1/2, size = 0.8) +
+  facet_wrap(~ run, nrow = 2) +
+  xlab(expression(paste(ln(sigma[theta]^2)," (turn volatility)"))) +
+  ylab(expression(paste(ln(mu)," (speed mean)"))) +
+  theme_bw()
+
+scat_1
+@
+
+<< param_scatter_2, fig.cap="Scatter plots of the (log) sampled speed mean against volatility (thinned and with burn-in time omitted) for the single state movement with independent steps simulation (points), with true parameter values used for the simulation (lines)." >>=
+
+scat_2 <- ggplot(data = samp_param[-burn_in_rows,], aes(log(V2), log(V3))) +
+  geom_vline(xintercept = log(50), alpha = 1/2) +
+  geom_hline(yintercept = log(30), alpha = 1/2) +
+  geom_point(alpha = 1/2, size = 0.8) +
+  facet_wrap(~ run, nrow = 2) +
+  xlab(expression(paste(ln(mu)," (speed mean)"))) +
+  ylab(expression(paste(ln(sigma[varphi]^2)," (speed volatility)"))) +
+  theme_bw()
+
+scat_2
+@
+
+<< param_density, fig.height = 8, fig.width = 15, fig.cap="Kernel density estimates of the sampled movement parameters (using thinned samples and with burn-in time omitted) for the single state movement with independent steps simulation (lines), with true parameter values used for the simulation (vertical lines)." >>=
+melt.samp_param <- melt(samp_param[-burn_in_rows,],
+                        id.var = c("iter","run"), measure.var = c("V1", "V2", "V3"))
+
+levels(melt.samp_param$variable) <- c(expression(paste(sigma[theta]^2," (turn volatility)")),
+                                          expression(paste(mu," (speed mean)")),
+                                          expression(paste(sigma[varphi]^2," (speed volatility)")))
+
+
+density_plot_1 <- ggplot(data = samp_param[-burn_in_rows,], aes(V1, linetype = run)) +
+  geom_vline(xintercept = 0.5, alpha = 1/2) +
+  #geom_density(size = 1) +
+  stat_density(geom="line",position="identity", size = 1) +
+  theme_bw() + xlab(expression(paste(sigma[theta]^2," (turn volatility)"))) +
+  scale_linetype_manual(name = "Refined time scale", values = c("solid","dashed","dotdash","dotted")) +
+  coord_cartesian(ylim = c(0,10)) + theme(legend.position = "top")
+
+density_plot_2 <- ggplot(data = samp_param[-burn_in_rows,], aes(V2, linetype = run)) +
+  geom_vline(xintercept = 50, alpha = 1/2) +
+  #geom_density(size = 1) +
+  stat_density(geom="line",position="identity", size = 1) +
+  theme_bw() + xlab(expression(paste(mu," (speed mean)"))) +
+  scale_linetype_manual(values = c("solid","dashed","dotdash","dotted")) + guides(linetype = "none") +
+  theme(plot.margin = unit(x = c(1.6, 0.25, 0.25, 0.25), units = "cm"))
+
+density_plot_3 <- ggplot(data = samp_param[-burn_in_rows,], aes(V3, linetype = run)) +
+  geom_vline(xintercept = 30, alpha = 1/2) +
+  #geom_density(size = 1) +
+  stat_density(geom="line",position="identity", size = 1) +
+  theme_bw() + xlab(expression(paste(sigma[varphi]^2," (speed volatility)"))) +
+  scale_linetype_manual(values = c("solid","dashed","dotdash","dotted")) + guides(linetype = "none") +
+  coord_cartesian(ylim = c(0,0.03)) +
+  theme(plot.margin = unit(x = c(1.6, 0.25, 0.25, 0.25), units = "cm"))
+
+grid.arrange(density_plot_1, density_plot_2, density_plot_3, ncol = 3)
+@
+
+<< param_tables >>=
+r <- c("5 (Obs)","1","0.5","0.01 (Sim)")
+box_1 <- box_2 <- box_3 <- matrix(NA, nrow = 4, ncol = 7)
+rownames(box_1) <- rownames(box_2) <- rownames(box_3) <- r
+colnames(box_1) <- colnames(box_2) <- colnames(box_3) <- c("min","q2.5","q25","q50","q75","q97.5","max")
+
+for(i in 1:4) {
+  box_1[i, ] <- quantile(subset(samp_param$V1[-burn_in_rows],samp_param$run[-burn_in_rows] == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+  box_2[i, ] <- quantile(subset(samp_param$V2[-burn_in_rows],samp_param$run[-burn_in_rows] == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+  box_3[i, ] <- quantile(subset(samp_param$V3[-burn_in_rows],samp_param$run[-burn_in_rows] == r[i]),
+         c(0,0.025,0.25,0.5,0.75,0.975,1))
+}
+@
+
+<< param_tab_1 >>=
+kable(cbind(round(box_1[,c(2,4,6)],3)),
+      col.names = c("2.5","50","97.5"),
+      caption = "turn volatility table")
+@
+
+<< param_tab_2 >>=
+kable(cbind(round(box_2[,c(2,4,6)],3)),
+      col.names = c("2.5","50","97.5"),
+      caption = "mean speed table")
+@
+
+<< param_tab_3 >>=
+kable(cbind(round(box_3[,c(2,4,6)],3)),
+      col.names = c("2.5","50","97.5"),
+      caption = "variance speed table")
+@
+
+<< param_boxplots, fig.cap="Credible intervals for the sampled movement parameters (using thinned samples and with burn-in time omitted) for the single state movement with independent steps simulation. Boxes give $2.5\\%$, $50\\%$ and $97.5\\%$ quantiles, with whiskers giving minimum and maximum values. True parameter values are also given (horizontal lines)." >>=
+param_box <- ggplot(data = melt.samp_param, aes(run, value)) +
+  geom_hline(data = true_param, aes(yintercept = z), alpha = 1/2) +
+  geom_boxplot() +
+  facet_grid(variable ~ ., scales = "free", labeller = label_parsed) +
+  theme_bw() + xlab("Refined time scale") + ylab("Parameter value")
+
+param_box
+@
+
+<< load sampled locations >>=
+samp_path <- rbind(
+  read.table("../loc_one.txt", header = T),
+  read.table("../loc_half.txt", header = T)
+  )
+samp_path$run <- factor(c(rep("1",50100),
+                          rep("0.5",100100)))
+@
+
+<< samp_paths, fig.width = 5, fig.height = 7, fig.cap = "Examples of the full sampled refined path reconstructions (coloured lines) for the single state movement with independent steps simulation. Path reconstruction only occurred when the time scale was 0.5 or 1. The true simulated path is also given (black line)." >>=
+ggplot(data = samp_path, aes(V1, V2, group = V3)) +
+  geom_path(alpha = 1/4, colour = "grey40") +
+  geom_path(data = simulated_path, aes(X, Y, group = 1), colour = "black") +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y") +
+  facet_grid(run ~ .)
+@
+
+<< samp_paths_zoom, fig.width = 9, fig.height = 5, fig.cap = "Examples of a small section of the sampled refined path reconstructions (coloured lines) for the single state movement with independent steps simulation. Path reconstruction only occurred when the time scale was 0.5 or 1. The true simulated path is given (thick black line) and the path used to initialise the MCMC sampler (thin black line)." >>=
+ggplot(data = samp_path, aes(V1, V2, group = V3)) +
+  geom_path(alpha = 1/3, colour = "grey40") +
+  geom_path(data = simulated_path, aes(X, Y, group = 1), colour = "black") +
+  theme_bw() + xlab("X") + ylab("Y") +
+  facet_grid(. ~ run) +
+  coord_fixed(xlim = c(-110, 400), ylim = c(-510, 10)) +
+  geom_path(data = initial_paths[initial_paths$run %in% c("1","0.5"),],
+            aes(X, Y, group = 1), colour = "black", linetype = 2)
+@
+
+<< acf_sim,fig.height = 10, fig.width = 10, fig.cap = "Autocorrelation in the MCMC movement parameter sampler, for the single state movement with independent steps simulation. Maximum lag shown up to $5\\%$ of the thinned sample size.">>=
+colnames(samp_param)[1:3] <- c("sigma[theta]^2", expression(mu), "sigma[varphi]^2")
+acf_1 <- qacf(samp_param[samp_param$run=="0.01 (Sim)", 1:3], lag.max = 50, title = "0.01 (Sim)")
+acf_2 <- qacf(samp_param[samp_param$run=="0.5", 1:3], lag.max = 200, title = "0.5")
+acf_3 <- qacf(samp_param[samp_param$run=="1", 1:3], lag.max = 200, title = "1")
+acf_4 <- qacf(samp_param[samp_param$run=="5 (Obs)", 1:3], lag.max = 50, title = "5 (Obs)")
+grid.arrange(acf_1,acf_2,acf_3,acf_4, nrow=2)
+@
+
+\end{document}
