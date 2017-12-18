@@ -58,7 +58,7 @@ ggplot(data = simulated_path, aes(X, Y)) + geom_path() +
 << load initial data >>=
 initial_paths <- rbind(
   read.table("../initial_path_obs.txt", header = T),
-  read.table("../initial_path_obs.txt", header = T),
+  read.table("../initial_path_one.txt", header = T),
   read.table("../initial_path_half.txt", header = T),
   read.table("../simulated_path.txt", header = T)
   )
@@ -263,12 +263,12 @@ samp_path <- rbind(
   read.table("../loc_one.txt", header = T),
   read.table("../loc_half.txt", header = T)
   )
-samp_path$run <- factor(c(rep("1",50100),
-                          rep("0.5",100100)))
+samp_path$run <- factor(c(rep("1",2004000),
+                          rep("0.5",4004000)))
 @
 
 << samp_paths, fig.width = 5, fig.height = 7, fig.cap = "Examples of the full sampled refined path reconstructions (coloured lines) for the single state movement with independent steps simulation. Path reconstruction only occurred when the time scale was 0.5 or 1. The true simulated path is also given (black line)." >>=
-ggplot(data = samp_path, aes(V1, V2, group = V3)) +
+ggplot(data = samp_path[samp_path$V3 %in% seq(1, 4000, 10), ], aes(V1, V2, group = V3)) +
   geom_path(alpha = 1/4, colour = "grey40") +
   geom_path(data = simulated_path, aes(X, Y, group = 1), colour = "black") +
   theme_bw() + coord_fixed() + xlab("X") + ylab("Y") +
@@ -276,7 +276,7 @@ ggplot(data = samp_path, aes(V1, V2, group = V3)) +
 @
 
 << samp_paths_zoom, fig.width = 9, fig.height = 5, fig.cap = "Examples of a small section of the sampled refined path reconstructions (coloured lines) for the single state movement with independent steps simulation. Path reconstruction only occurred when the time scale was 0.5 or 1. The true simulated path is given (thick black line) and the path used to initialise the MCMC sampler (thin black line)." >>=
-ggplot(data = samp_path, aes(V1, V2, group = V3)) +
+ggplot(data = samp_path[samp_path$V3 %in% seq(1, 4000, 10), ], aes(V1, V2, group = V3)) +
   geom_path(alpha = 1/3, colour = "grey40") +
   geom_path(data = simulated_path, aes(X, Y, group = 1), colour = "black") +
   theme_bw() + xlab("X") + ylab("Y") +
