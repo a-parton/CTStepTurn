@@ -1,6 +1,6 @@
 # CTStepTurn
 
-CTStepTurn is an R package containing the functions needed to carry out inference for multistate continuous-step step-and-turn movement modelling, as detailed in Parton and Blackwell (2017), available at https://link.springer.com/article/10.1007/s13253-017-0286-5. 
+CTStepTurn is an R package containing the functions needed to carry out inference for multistate continuous-time step-and-turn movement modelling, as detailed in Parton and Blackwell (2017), available at https://link.springer.com/article/10.1007/s13253-017-0286-5. 
 
 A number of example implementation scripts are provided, detailed below.
 
