@@ -1,0 +1,465 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[top=1in, bottom=1in, left=1in, right=1in]{geometry}
+\usepackage{setspace}
+\doublespacing
+\usepackage{amsmath}
+\usepackage{pdflscape}
+
+\title{Two state simulation example}
+\author{Alison Parton}
+\date{December 2017}
+
+\begin{document}
+%\SweaveOpts{concordance=TRUE}
+\let\B\boldsymbol
+
+<<setup, include=FALSE, cache=FALSE>>=
+library(knitr)
+# set global chunk options
+opts_chunk$set(fig.path='figure/minimal-', fig.align='center', fig.show='hold')
+options(formatR.arrow=TRUE,width=90)
+knitr::opts_chunk$set(echo = FALSE)
+library(psych) # required for displaying head and tail of a dataframe together
+library(ggplot2) # required for graphics
+library(grid) # required to plot mutliple things together
+library(reshape2)
+library(gridExtra)
+source("qacf.R") # function to plot acf in ggplot2
+library(coda)
+library(lattice)
+@
+
+\maketitle
+
+<< sim_path >>=
+simulated_behav <- read.table("../behav_proc.txt", header = TRUE)
+simulated_path <- read.table("../sim_path.txt", header = TRUE)
+
+kable(simulated_behav, caption = "Simulated true behavioural process.", col.names = c("Time of switch","Behaviour"))
+
+kable(headTail(simulated_path[, c(4,1,2,3,5,6)], hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extract of the simulated true path.",
+      col.names=c("Time","Bearing","Step","Behaviour","X","Y"))
+@
+
+<< obs >>=
+obs <- read.table("../observations.txt", header = TRUE)
+
+kable(headTail(obs, hlength = 3, tlength = 3, digits=2, ellipsis = TRUE),
+      caption = "Extracts of the observed locations.",
+      col.names=c("Time","X","Y"))
+@
+
+<< sim_obs_plot, fig.height = 8, fig.width = 8, fig.cap = "" >>=
+cols <- c("black","#1b9e77")
+simulated_path$behavs[100010] <- 2
+
+ggplot(data = simulated_path, aes(X, Y, colour = as.factor(behavs), group = 1)) +
+  geom_path() +
+  geom_point(data = obs, aes(x, y, colour = as.factor(simulated_path$behavs[seq(1,100010,500)]))) +
+  theme_bw() + coord_fixed() +
+  scale_colour_manual(name = "Behaviour", values = cols) +
+  theme(legend.position = "top")
+@
+
+<< sim_bear_speed_plot, fig.height = 10, fig.width = 8, fig.cap = "" >>=
+simulated_path$speed <- c(simulated_path$steps[-100010] / diff(simulated_path$times), NA)
+sim_path.melt <- melt(simulated_path, measure.vars = c("bearings", "speed", "behavs"), id.vars = c("times","behavs"))
+
+# make the behaviour for behaviour all 2 so that the behaviour plot is just shown as black
+sim_path.melt$behavs[sim_path.melt$variable == "behavs"] <- 1
+
+levels(sim_path.melt$variable) <- c(expression(paste(theta," (bearing)")),
+                                    expression(paste(psi," (speed)")),
+                                    expression(paste(B," (behaviour)")))
+
+ggplot(data = sim_path.melt, aes(times, value, colour = as.factor(behavs), group = 1)) +
+  geom_path() +
+  theme_bw() + xlab("Time") + ylab("") +
+  facet_wrap(~ variable, scales = "free", ncol = 1, labeller=label_parsed) +
+  scale_colour_manual(name = "Behaviour", values = cols) +
+  theme(legend.position = "top")
+@
+
+<< load initial data >>=
+initial_path <- read.table("../initial_path.txt", header = T)
+
+initial_path$speeds <- c(initial_path$step[-1001] / diff(initial_path$times), NA)
+initial_path$turns <- c(diff(initial_path$bearings), NA)
+initial_path$behavs[1001] <- 2
+@
+
+<< initial_path, fig.height = 8, fig.width = 8, fig.cap = "">>=
+ggplot(data = initial_path, aes(X, Y, color = as.factor(behavs), group = 1)) +
+  geom_path(na.rm = T) +
+  #geom_point(data = obs, aes(x, y, colour = as.factor(simulated_path$behavs[seq(1,100010,500)]))) +
+  theme_bw() + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = cols) +
+  theme(legend.position="top") +
+  coord_fixed()
+@
+
+<< initial_bear_speed, fig.height = 10, fig.width = 8, fig.cap = "" >>=
+melt.red_init_path <- melt(initial_path,
+                            id.var = c("times","behavs"),
+                            measure.var = c("bearings","speeds","behavs"))
+
+# make the behaviour for behaviour all 2 so that the behaviour plot is just shown as black
+melt.red_init_path$behavs[melt.red_init_path$variable == "behavs"] <- 1
+
+levels(melt.red_init_path$variable) <- c(expression(paste(theta," (bearing)")),
+                                    expression(paste(psi," (speed)")),
+                                    expression(paste(B," (behaviour)")))
+
+ggplot(data = melt.red_init_path, aes(times, value, color = as.factor(behavs), group = 1)) +
+  geom_line() +
+  facet_wrap(~ variable, ncol = 1, scales = "free", labeller=label_parsed) +
+  theme_bw() + theme(legend.position="top") +
+  xlab("Time") + ylab("") +
+  scale_color_manual(name = "Behaviour", values = cols)
+@
+
+<< load sampled parameters >>=
+move_param <- read.table("../move_param.txt", header = T)
+move_param <- move_param[,-9]
+colnames(move_param) <- c("tv1","tv2","ms1","ms2","cs1","cs2","vs1","vs2")
+behav_param <- read.table("../behav_param.txt", header = T)
+colnames(behav_param) <- c("l1","l2")
+param <- cbind(move_param, behav_param)
+param$iter <- seq(1, 10^7, 10^3)
+burn_in_rows <- c(1:4000)
+# take the first 2/5 of the run as burn-in
+@
+
+<< move_param_trace, fig.width = 12, fig.height = 14, fig.cap="" >>=
+#options(scipen=0); options(digits=1)
+melt.param <- melt(param, id.var = c("iter"))
+melt.param$behavs <- rep(1, 100000)
+melt.param$behavs[melt.param$variable %in% c("tv2","ms2","cs2","vs2","l2")] <- 2
+levels(melt.param$variable) <- c(expression(paste(sigma[theta*1]^2," (turn volatility for state 1)")),
+                                 expression(paste(sigma[theta*2]^2," (turn volatility for state 2)")),
+                                 expression(paste(mu[1]," (speed mean for state 1)")),
+                                 expression(paste(mu[2]," (speed mean for state 2)")),
+                                 expression(paste(beta[1]," (speed correlation for state 1)")),
+                                 expression(paste(beta[2]," (speed correlation for state 2)")),
+                                 expression(paste(sigma[psi*1]^2," (speed volatility for state 1)")),
+                                 expression(paste(sigma[psi*2]^2," (speed volatility for state 2)")),
+                                 expression(paste(lambda[1]," (switching rate out of state 1)")),
+                                 expression(paste(lambda[2]," (switching rate out of state 1)")))
+true_param <- data.frame(variable = levels(melt.param$variable),
+                         z = c(0.8,0.05, 15,40, 0.07,0.02, 40,400,0.01,0.015))
+
+ggplot(data = melt.param, aes(iter, value)) +
+  geom_hline(data = true_param, aes(yintercept = z), alpha = 1/2) +
+  geom_line() +
+  facet_wrap(~ variable, ncol = 2, scales = "free", labeller = label_parsed) +
+  theme_bw() +
+  xlab("Iteration") + ylab("")
+@
+
+<< short_term_var_trace, fig.height = 4, fig.width = 10, fig.cap = "" >>=
+move_param$stvs1 <- move_param$vs1 * (1 - exp(-10 * move_param$cs1))
+move_param$stvs2 <- move_param$vs2 * (1 - exp(-10 * move_param$cs2))
+st_var <- move_param[, c(9,10)]
+st_var$iter <- seq(1, 10^7, 10^3)
+
+melt.st_var <- melt(st_var, id.var = c("iter"), measure.var = c("stvs1","stvs2"))
+melt.st_var$behavs <- rep(1, 20000)
+melt.st_var$behavs[melt.st_var$variable == "stvs2"] <- 2
+levels(melt.st_var$variable) <- c(expression(paste(sigma[psi*1]^2*(1-e^{-10*beta[1]})," (short term speed volatility for state 1)")),
+                                 expression(paste(sigma[psi*2]^2*(1-e^{-10*beta[2]})," (short term speed volatility for state 2)")))
+
+true_st_var <- data.frame(variable = levels(melt.st_var$variable),
+                         z = c(40*(1-exp(-10*0.07)), 400*(1-exp(-10*0.02))))
+
+ggplot(melt.st_var, aes(iter, value)) +
+  geom_hline(data = true_st_var, aes(yintercept = z), alpha = 1/2) +
+  geom_line() +
+  facet_wrap(~ variable, ncol = 2, scales = "free", labeller = label_parsed) +
+  theme_bw() +
+  xlab("Iteration") + ylab("")
+@
+
+<< scatter_behav_param, fig.width = 6, fig.height = 6, fig.cap="" >>=
+#options(digits=7)
+ggplot(data = behav_param[-burn_in_rows,], aes(log(l1), log(l2))) +
+  geom_point(alpha = 1, size = 0.5, colour = "grey40") +
+  geom_point(aes(log(0.01), log(0.015)), colour = "black", shape = 10, size = 3) +
+  xlab(expression(paste(ln(lambda[1])," (switching rate out of state 1)"))) +
+  ylab(expression(paste(ln(lambda[2])," (switching rate out of state 2)"))) +
+  theme_bw()
+@
+
+<< scatter_move_param, fig.width = 10, fig.height = 5, fig.cap="" >>=
+#options(digits=7)
+m_par <- move_param[-burn_in_rows, ]
+colnames(m_par) <- rep(c("tv","sm","sc","sv", "stvs"), rep(2,5))
+m_par <- rbind(m_par[,c(1,3,5,7,9)], m_par[,c(2,4,6,8,10)])
+m_par$b <- factor(c(rep(1,6000),rep(2,6000)))
+
+scat_1 <- ggplot(data = m_par, aes(log(tv), log(sm), shape = b, colour = b)) +
+  geom_point(alpha = 1/3, size = 0.5) +
+  geom_point(aes(log(0.8), log(15)), colour = "black", shape = 10, size = 3) +
+  geom_point(aes(log(0.05), log(40)), colour = "black", shape = 10, size = 3) +
+  xlab(expression(paste(ln(sigma[theta]^2)," (turn volatility)"))) +
+  ylab(expression(paste(ln(mu)," (speed mean)"))) +
+  theme_bw() + theme(legend.position="top") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  scale_shape_manual(name = "Behaviour", values = c(0,8)) +
+  guides(colour = guide_legend(override.aes = list(size = 2, alpha = 1)))
+
+scat_2 <- ggplot(data = m_par, aes(log(sc), log(sv), colour = b, shape = b)) +
+  geom_point(alpha = 1/3, size = 0.5) +
+  geom_point(aes(log(0.07), log(40)), colour = "black", shape = 10, size = 3) +
+  geom_point(aes(log(0.02), log(400)), colour = "black", shape = 10, size = 3) +
+  xlab(expression(paste(ln(beta)," (speed correlation)"))) +
+  ylab(expression(paste(ln(sigma[psi]^2)," (speed volatility)"))) +
+  theme_bw() + theme(legend.position="top") +
+  scale_color_manual(values = c("grey40","#1b9e77")) +
+  scale_shape_manual(values = c(0,8)) +
+  guides(colour = "none", shape = "none") +
+  theme(plot.margin = unit(x = c(1.6, 0.25, 0.25, 0.25), units = "cm"))
+
+grid.arrange(scat_1, scat_2, nrow = 1)
+@
+
+<< param_density, fig.height = 10, fig.width = 10, fig.cap="" >>=
+melt.param <- melt(param[-burn_in_rows, ], id.var = c("iter"))
+melt.param$behavs <- rep(1, 60000)
+melt.param$behavs[melt.param$variable %in% c("tv2","ms2","cs2","vs2","l2")] <- 2
+levels(melt.param$variable) <- c(expression(paste(sigma[theta*1]^2," (turn volatility for state 1)")),
+                                 expression(paste(sigma[theta*2]^2," (turn volatility for state 2)")),
+                                 expression(paste(mu[1]," (speed mean for state 1)")),
+                                 expression(paste(mu[2]," (speed mean for state 2)")),
+                                 expression(paste(beta[1]," (speed correlation for state 1)")),
+                                 expression(paste(beta[2]," (speed correlation for state 2)")),
+                                 expression(paste(sigma[psi*1]^2," (speed volatility for state 1)")),
+                                 expression(paste(sigma[psi*2]^2," (speed volatility for state 2)")),
+                                 expression(paste(lambda[1]," (switching rate out of state 1)")),
+                                 expression(paste(lambda[2]," (switching rate out of state 1)")))
+
+ggplot(data = melt.param, aes(value)) +
+  geom_vline(data = true_param, aes(xintercept = z), alpha = 1/2) +
+  geom_density() +
+  facet_wrap(~ variable, ncol = 2, scales = "free", labeller = label_parsed) +
+  theme_bw() +
+  xlab("") + ylab("Density")
+@
+
+<< short_term_var_density, fig.height = 5, fig.width = 10, fig.cap = "" >>=
+move_param$stvs1 <- move_param$vs1 * (1 - exp(-10 * move_param$cs1))
+move_param$stvs2 <- move_param$vs2 * (1 - exp(-10 * move_param$cs2))
+st_var <- move_param[-burn_in_rows, c(9,10)]
+
+melt.st_var <- melt(st_var)
+melt.st_var$behavs <- rep(1, 12000)
+melt.st_var$behavs[melt.st_var$variable == "stvs2"] <- 2
+levels(melt.st_var$variable) <- c(expression(paste(sigma[psi*1]^2*(1-e^{-10*beta[1]})," (short term speed volatility for state 1)")),
+                                 expression(paste(sigma[psi*2]^2*(1-e^{-10*beta[2]})," (short term speed volatility for state 2)")))
+
+ggplot(melt.st_var, aes(value)) +
+  geom_vline(data = true_st_var, aes(xintercept = z), colour = "black", alpha = 1/2) +
+  geom_density() +
+  facet_wrap(~ variable, ncol = 2, scales = "free", labeller = label_parsed) +
+  theme_bw() +
+  xlab("") + ylab("Density")
+@
+
+<< param_tables >>=
+m_mcmc <- mcmc(move_param[-burn_in_rows, ])
+#effectiveSize(m_mcmc)
+#heidel.diag(m_mcmc)
+#summary(m_mcmc)
+
+box_m <- apply(move_param[-burn_in_rows, ], 2, quantile, c(0,0.025,0.25,0.5,0.75,0.975,1))
+kable(t(rbind(signif(box_m[c(2,4,6),],3), effectiveSize(m_mcmc))),
+      col.names = c("2.5","50","97.5","Effective sample size"),
+      caption = "move param table")
+
+b_mcmc <- mcmc(behav_param[-burn_in_rows, ])
+#effectiveSize(b_mcmc)
+#heidel.diag(b_mcmc)
+#summary(b_mcmc)
+box_b <- apply(behav_param[-burn_in_rows, ], 2, quantile, c(0,0.025,0.25,0.5,0.75,0.975,1))
+kable(t(rbind(signif(box_b[c(2,4,6),],3), effectiveSize(b_mcmc))),
+      col.names = c("2.5","50","97.5","Effective sample size"),
+      caption = "behav param table")
+@
+
+<< load sampled locations >>=
+path <- read.table("../locs.txt", header = T)
+behavs <- read.table("../behavs.txt", header = T)
+times <- read.table("../times.txt", header = T)
+behav_prob <- read.table("../prob_state_1_time_scale_1.txt", header = T)
+behav_prob$time <- 0:999
+path$behavs <- as.vector(t(behavs))
+path$times <- as.vector(t(times))
+@
+
+<< behav_probs, fig.width = 8, fig.height = 4, fig.cap = "" >>=
+obs_points <- data.frame(t = seq(0,1000,5),
+                         x = rep(-0.01,201))
+
+ggplot(data = behav_prob, aes(time, 1 - x/6000)) +
+  geom_line(data = simulated_path, aes(times, behavs-1), linetype = 2, alpha = 1/2) +
+  geom_line() +
+  geom_point(data = obs_points, aes(t, x-0.04), size = 0.1) +
+  theme_bw() + xlab("Time") + ylab("Probability of being in behavioural state 2")
+@
+
+<< behav_probs_2, fig.width = 10, fig.height = 5, fig.cap = "" >>=
+ggplot(data = behav_prob) +
+  geom_linerange(aes(x = time, ymin = 1-(1-x/6000)/2, ymax = 1+(1-x/6000)/2), col="grey40") +
+  geom_linerange(aes(x = time, ymin = -(x/6000)/2, ymax = (x/6000)/2), col="grey40") +
+  geom_line(data = simulated_path, aes(times, behavs-1), na.rm=T, size = 1) +
+  geom_point(data = obs_points, aes(t, x-0.54), size = 0.3) +
+  theme_bw() + xlab("Time") +
+  scale_y_continuous("Behaviour", breaks = c(0,1), labels = c("1","2"))
+@
+
+<< samp_paths_all, fig.width = 9, fig.height = 9, fig.cap = "" >>=
+ggplot(data = path, aes(V1, V2, group = V3, colour = factor(behavs))) +
+  geom_path(alpha = 1/4, na.rm = T) +
+  geom_path(data = simulated_path, aes(X, Y, group = 1), colour = "black") +
+  theme_bw() + coord_fixed() + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  guides(colour = "none")
+@
+
+<< samp_paths_zoom_1, fig.width = 7, fig.height = 10, fig.cap = "" >>=
+switch_locs <- data.frame(X = rep(NA,length(simulated_behav$times)),
+                          Y = rep(NA,length(simulated_behav$times)),
+                          time = rep(NA,length(simulated_behav$times)))
+for(i in 1:length(simulated_behav$times)) {
+  index <- which.min(abs(simulated_path$times - simulated_behav$times[i]))
+  switch_locs$X[i] <- simulated_path$X[index]
+  switch_locs$Y[i] <- simulated_path$Y[index]
+  switch_locs$time[i] <- simulated_path$times[index]
+}
+
+red_path <- path[path$times >= 300 & path$times <= 475, ]
+red_sim_path <- simulated_path[simulated_path$times >= 300 & simulated_path$times <= 475, ]
+
+zoom_1 <- ggplot(data = red_path, aes(V1, V2, group = V3, colour = factor(behavs))) +
+  geom_path(alpha = 1/4, na.rm = T) +
+  geom_point(data = switch_locs, aes(X, Y, group = 1), colour = "black", shape = 10, size = 3) +
+  theme_bw() + coord_fixed(xlim = c(3200, 3700), ylim = c(1500, 2650)) + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  geom_text(data = switch_locs[c(5,6), ], aes(X, Y, group = 1, label = round(time,1)), color = "black",
+            hjust = c(-1.5, -1), vjust=0.5, size = 3) +
+  guides(colour = "none")
+
+zoom_2 <- ggplot(data = red_sim_path, aes(X, Y, group = 1, colour = factor(behavs))) +
+  geom_path(na.rm = T) +
+  geom_point(data = obs, aes(x, y, colour = as.factor(simulated_path$behavs[seq(1,100010,500)]))) +
+  geom_point(data = switch_locs, aes(X, Y, group = 1), colour = "black", shape = 10, size = 3) +
+  theme_bw() + coord_fixed(xlim = c(3200, 3700), ylim = c(1500, 2650)) + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  guides(colour = "none")
+
+zoom_3 <- ggplot(data = behav_prob, aes(time, 1 - x/6000)) +
+  geom_line(data = simulated_path, aes(times, behavs-1), linetype = 2, alpha = 1/2, na.rm = T) +
+  geom_line(na.rm = T) +
+  geom_point(data = obs_points, aes(t, x-0.04), size = 0.3, na.rm = T) +
+  theme_bw() + xlab("Time") + ylab("Probability of being in behavioural state 2") +
+  xlim(c(300, 470))
+
+plot(zoom_1, vp = viewport(width=0.5,height=0.7,x=0.25,y=0.3+0.35))
+plot(zoom_2, vp = viewport(width=0.5,height=0.7,x=0.75,y=0.3+0.35))
+plot(zoom_3, vp = viewport(width=1,height=0.3,x=0.5,y=1/2*0.3))
+@
+
+<< samp_paths_zoom_2, fig.width = 8, fig.height = 6, fig.cap = "" >>=
+red_path <- path[path$times >= 0 & path$times <= 25, ]
+red_sim_path <- simulated_path[simulated_path$times >= 0 & simulated_path$times <= 25, ]
+
+zoom_1 <- ggplot(data = red_path, aes(V1, V2, group = V3, colour = factor(behavs))) +
+  geom_path(alpha = 1/3, na.rm = T) +
+  geom_point(data = switch_locs, aes(X, Y, group = 1), colour = "black", shape = 10, size = 3) +
+  theme_bw() + coord_fixed(xlim = c(-200, 150), ylim = c(-20, 250)) + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  geom_text(data = switch_locs[c(1,2), ], aes(X, Y, group = 1, label = round(time,1)), color = "black",
+            hjust = c(2.5,-2), vjust=0.5, size = 3) +
+  guides(colour = "none")
+
+zoom_2 <- ggplot(data = red_sim_path, aes(X, Y, group = 1, colour = factor(behavs))) +
+  geom_path(na.rm = T) +
+  geom_point(data = obs, aes(x, y, colour = as.factor(simulated_path$behavs[seq(1,100010,500)]))) +
+  geom_point(data = switch_locs, aes(X, Y, group = 1), colour = "black", shape = 10, size = 3) +
+  theme_bw() + coord_fixed(xlim = c(-200, 150), ylim = c(-20, 250)) + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  guides(colour = "none")
+
+zoom_3 <- ggplot(data = behav_prob, aes(time, 1 - x/6000)) +
+  geom_line(data = simulated_path, aes(times, behavs-1), linetype = 2, alpha = 1/2, na.rm = T) +
+  geom_line(na.rm = T) +
+  geom_point(data = obs_points, aes(t, x-0.04), size = 0.3, na.rm = T) +
+  theme_bw() + xlab("Time") + ylab("Probability of being in behavioural state 2") +
+  xlim(c(0, 20))
+
+plot(zoom_1, vp = viewport(width=0.5,height=0.6,x=0.25,y=0.4+0.3))
+plot(zoom_2, vp = viewport(width=0.5,height=0.6,x=0.75,y=0.4+0.3))
+plot(zoom_3, vp = viewport(width=1,height=0.4,x=0.5,y=1/2*0.4))
+@
+
+<< samp_paths_zoom_3, fig.width = 10, fig.height = 8, fig.cap = "" >>=
+red_path <- path[path$times >= 530 & path$times <= 750, ]
+red_sim_path <- simulated_path[simulated_path$times >= 530 & simulated_path$times <= 750, ]
+
+zoom_1 <- ggplot(data = red_path, aes(V1, V2, group = V3, colour = factor(behavs))) +
+  geom_path(alpha = 1/4, na.rm = T) +
+  geom_point(data = switch_locs, aes(X, Y, group = 1), colour = "black", shape = 10, size = 3) +
+  geom_point(data = obs[116:118, ], aes(x, y, group = 1), colour = "black") +
+  theme_bw() + coord_fixed(xlim = c(1180, 1900), ylim = c(3200, 3810)) + xlab("X") + ylab("Y") +
+  geom_text(data = switch_locs[7:9, ], aes(X, Y, group = 1, label = round(time,1)), color = "black",
+            hjust = c(-0.5,-0.9,-0.8), vjust=c(-2.7,0,-2), size = 3) +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  guides(colour = "none")
+
+zoom_2 <- ggplot(data = red_sim_path, aes(X, Y, group = 1, colour = factor(behavs))) +
+  geom_path(na.rm = T) +
+  geom_point(data = obs[105:151, ], aes(x, y, colour = as.factor(simulated_path$behavs[seq(1,100010,500)[105:151]]))) +
+  geom_point(data = switch_locs, aes(X, Y, group = 1), colour = "black", shape = 10, size = 3) +
+  geom_point(data = obs[116:118, ], aes(x, y, group = 1), colour = "#d95f02") +
+  theme_bw() + coord_fixed(xlim = c(1180, 1900), ylim = c(3200, 3810)) + xlab("X") + ylab("Y") +
+  scale_color_manual(name = "Behaviour", values = c("grey40","#1b9e77")) +
+  guides(colour = "none")
+
+zoom_3 <- ggplot(data = behav_prob, aes(time, 1 - x/6000)) +
+  geom_line(data = simulated_path, aes(times, behavs-1), linetype = 2, alpha = 1/2, na.rm = T) +
+  geom_line(na.rm = T) +
+  geom_point(data = obs_points, aes(t, x-0.04), size = 0.3, na.rm = T) +
+  theme_bw() + xlab("Time") + ylab("Probability of being in behavioural state 2") +
+  xlim(c(530, 750))
+
+plot(zoom_1, vp = viewport(width=0.5,height=0.6,x=0.25,y=0.4+0.3))
+plot(zoom_2, vp = viewport(width=0.5,height=0.6,x=0.75,y=0.4+0.3))
+plot(zoom_3, vp = viewport(width=1,height=0.4,x=0.5,y=1/2*0.4))
+@
+
+<< acf_sim,fig.height = 20, fig.width = 20, fig.cap = "">>=
+#qacf(param[-burn_in_rows, -11], lag.max = 300, title = "ACF")
+
+#acfplot(m, lag.max=300, layout=c(2,5))
+#par(mfrow=c(5,2))
+#par(mar=c(4,4,1,1))
+#autocorr.plot(m, lag.max=300, auto.layout=F)
+
+colnames(param) <- c("turn volatility, state 1",
+                     "turn volatility, state 2",
+                     "speed mean, state 1",
+                     "speed mean, state 2",
+                     "speed correlation, state 1",
+                     "speed correlation, state 2",
+                     "speed volatility, state 1",
+                     "speed volatility, state 2",
+                     "switching rate out of state 1",
+                     "switching rate out of state 1")
+m <- mcmc(param[-burn_in_rows, -11])
+crosscorr.plot(m, col = grey.colors(10))
+
+@
+
+\end{document}

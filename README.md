@@ -61,6 +61,32 @@ Samples of the parameters and path are stored.
 
 Figures of the results of this example can be produced using the `single_simulation/plot_results/plot.Rnw` file. This is an R Sweave document that can be compiled in R to produce individual pdf's of each of the results figures. Note that this relies on having implemented all included scripts to plot and compare the results.
 
+### Example multi_simulation
+
+This example implements two-state movement for a set of simulated observations assuming correlated steps with two behavioural states. To run this example, source the `multi_simulation/script.R` file. 
+
+1) In this case, the observations are given by `multi_simulation/observations.txt`. The initial refined path is created using `InitialPath.r`. For this example, the correlated step model is assumed (`indep_step = FALSE`) and no observation error is assumed (`obs_error = FALSE`, `corr_obs_error = FALSE`). Initial parameters are set as estimates from the initial path. Perturbation variances and prior distributions are assigned using `FixedConstants.R`. The speed parameter prior is set as a function `calc_prior_speed_lik`. Variables detailing the run length of the MCMC algorithm are set.
+
+2) The MCMC algorithm is carried out as a for loop over the pre-set run length. Parameters are updated using 
+```
+update_behav_param()
+update_speed_param()
+update_bearing_param()
+```
+Note that `Gibbs_update_obs_error_param()` is not implemented as no error is assumed here.
+Refined path is updated using
+```
+draw_random_path_section()
+set_fixed_values()
+set_current_values()
+update_refined_path()
+```
+Samples of the parameters and path are stored.
+
+3) The results of the algorithm are written to text files to store.
+
+Figures of the results of this example can be produced using the `multi_simulation/plot_results/plot.Rnw` file. This is an R Sweave document that can be compiled in R to produce individual pdf's of each of the results figures.
+
 ### Example single_reindeer_error
 
 This example implements single state movement for a set of reindeer observations, with unknown, independent observation errors. To run this example, source the `single_reindeer_error/script.R` file. 
